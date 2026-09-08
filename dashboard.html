@@ -121,6 +121,7 @@
   <header>
     <div class="brand"><span class="dot">MM</span><span>Portfolio Dashboard</span></div>
     <div class="status" id="status">—</div>
+    <div class="status" id="serverStatus">Checking server…</div>
     <div class="hdr-btns">
       <a class="btn ghost-link" href="index.html" target="_blank">↗ View portfolio</a>
       <button class="btn primary" data-act="save">💾 Save</button>
@@ -938,7 +939,11 @@ document.addEventListener('click', function(e){
 function doSave(){
   storeSet(STORE_KEY, JSON.stringify(CONTENT));
   markSaved();
-  flash('Saved ✓ — portfolio updated');
+  flash('Saved ✓');
+  fetch('/api/save', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(CONTENT) })
+    .then(function(r){ return r.ok ? r.json() : Promise.reject(new Error('http '+r.status)); })
+    .then(function(){ serverConnected = true; updateServerStatus(); flash('Saved ✓ — index.html updated'); })
+    .catch(function(){ serverConnected = false; updateServerStatus(); flash('Saved in browser — use "Download updated site" to update the file','err'); });
 }
 function doExport(){
   const blob = new Blob([JSON.stringify(CONTENT, null, 2)], {type:'application/json'});
@@ -980,9 +985,10 @@ function triggerDownload(blob, name){
 /* bake content into a fresh index.html */
 function injectContent(html){
   const baked = JSON.stringify(CONTENT).replace(/</g,'\\u003c');
-  const marker = 'window.__BAKED_CONTENT__ = null;';
-  if(html.indexOf(marker) === -1){ throw new Error('marker-not-found'); }
-  return html.replace(marker, 'window.__BAKED_CONTENT__ = '+baked+';');
+  const newLine = 'window.__BAKED_CONTENT__ = '+baked+';';
+  const re = /window\.__BAKED_CONTENT__\s*=\s*[^;]*;/;
+  if(!re.test(html)){ throw new Error('marker-not-found'); }
+  return html.replace(re, newLine);
 }
 
 function doDownload(){
@@ -1017,6 +1023,17 @@ function showApp(){
   document.getElementById('app').classList.add('on');
   renderTab('hero');
   markSaved();
+  pingServer();
+  // if no local copy exists, load the latest persisted content from the server
+  if(!storeGet(STORE_KEY)){
+    fetch('/api/load').then(function(r){ return r.ok ? r.json() : null; }).then(function(d){
+      if(d && Object.keys(d).length){
+        CONTENT = deepMerge(deepClone(DEFAULT_CONTENT), d);
+        renderTab(currentTab);
+        flash('Loaded latest saved content');
+      }
+    }).catch(function(){});
+  }
 }
 document.getElementById('loginBtn').addEventListener('click', tryLogin);
 document.getElementById('passInput').addEventListener('keydown', e=>{ if(e.key === 'Enter') tryLogin(); });
@@ -1079,6 +1096,21 @@ document.getElementById('blockImageFile').addEventListener('change', function(e)
 
 /* mobile preview state */
 let previewMobile = false;
+
+/* server connection state */
+let serverConnected = null;
+function updateServerStatus(){
+  const el = document.getElementById('serverStatus');
+  if(!el) return;
+  if(serverConnected === true){ el.textContent = '🟢 Server connected — edits update index.html automatically'; el.style.color = 'var(--green)'; }
+  else if(serverConnected === false){ el.textContent = '🟠 No write access — use "Download updated site"'; el.style.color = '#fbbf24'; }
+  else { el.textContent = 'Checking server…'; el.style.color = 'var(--muted)'; }
+}
+function pingServer(){
+  fetch('/api/ping').then(function(r){ return r.ok ? r.json() : Promise.reject(new Error()); })
+    .then(function(){ serverConnected = true; updateServerStatus(); })
+    .catch(function(){ serverConnected = false; updateServerStatus(); });
+}
 
 /* project images upload */
 let lastImgIndex = 0;
