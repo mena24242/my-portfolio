@@ -1,0 +1,1137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Portfolio Dashboard — Mena Medhat</title>
+<meta name="robots" content="noindex" />
+<style>
+  :root{
+    --bg:#05070d;--panel:#0c1524;--panel2:#0f1a2e;
+    --line:rgba(56,189,248,.14);--line2:rgba(56,189,248,.3);
+    --cyan:#22d3ee;--blue:#38bdf8;--violet:#a78bfa;
+    --text:#e6f1fb;--muted:#8fa6bd;
+    --danger:#fb7185;--green:#34d399;
+    --mono:"SFMono-Regular",ui-monospace,Consolas,Menlo,monospace;
+    --sans:"Segoe UI",system-ui,-apple-system,Roboto,Arial,sans-serif;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:100vh;line-height:1.5}
+  ::selection{background:rgba(34,211,238,.3)}
+
+  /* ---------- login gate ---------- */
+  .gate{position:fixed;inset:0;z-index:100;display:flex;align-items:center;justify-content:center;background:radial-gradient(circle at 50% 30%,#0a1424,#05070d)}
+  .gate-box{width:min(380px,90vw);padding:36px;border:1px solid var(--line2);border-radius:20px;background:var(--panel);box-shadow:0 30px 80px rgba(0,0,0,.5)}
+  .gate-box .lg{font-family:var(--mono);font-weight:800;font-size:44px;background:linear-gradient(135deg,var(--cyan),var(--violet));-webkit-background-clip:text;background-clip:text;color:transparent;text-align:center;margin-bottom:6px}
+  .gate-box h1{font-size:19px;text-align:center;margin-bottom:4px}
+  .gate-box p{color:var(--muted);font-size:13px;text-align:center;margin-bottom:20px}
+  .gate-box input{width:100%;padding:13px 15px;border-radius:11px;border:1px solid var(--line2);background:rgba(9,16,28,.8);color:var(--text);font-size:15px;outline:none;margin-bottom:12px}
+  .gate-box input:focus{border-color:var(--cyan);box-shadow:0 0 0 3px rgba(34,211,238,.12)}
+  .gate-box button{width:100%;padding:13px;border-radius:11px;border:none;background:linear-gradient(135deg,var(--cyan),var(--blue));color:#04121c;font-weight:700;font-size:15px;cursor:pointer}
+  .gate-err{color:var(--danger);font-size:13px;text-align:center;margin-top:10px;min-height:18px}
+
+  /* ---------- app ---------- */
+  #app{display:none}
+  #app.on{display:block}
+  header{position:sticky;top:0;z-index:20;display:flex;align-items:center;justify-content:space-between;gap:14px;padding:12px 22px;background:rgba(5,7,13,.85);backdrop-filter:blur(12px);border-bottom:1px solid var(--line);flex-wrap:wrap}
+  header .brand{display:flex;align-items:center;gap:10px;font-weight:700}
+  header .brand .dot{width:34px;height:34px;border-radius:9px;display:grid;place-items:center;background:linear-gradient(135deg,var(--cyan),var(--violet));font-family:var(--mono);color:#04121c;font-weight:800}
+  header .status{font-family:var(--mono);font-size:12px;color:var(--muted)}
+  header .status.dirty{color:#fbbf24}
+  .hdr-btns{display:flex;gap:8px;flex-wrap:wrap}
+  .btn{display:inline-flex;align-items:center;gap:7px;padding:9px 15px;border-radius:9px;border:1px solid var(--line2);background:rgba(56,189,248,.07);color:var(--text);font-size:13px;font-weight:600;cursor:pointer;transition:.15s;font-family:var(--sans)}
+  .btn:hover{border-color:var(--cyan);background:rgba(34,211,238,.12)}
+  .btn.primary{color:#04121c;background:linear-gradient(135deg,var(--cyan),var(--blue));border:none}
+  .btn.ghost-link{text-decoration:none}
+  .btn.danger{border-color:rgba(244,63,94,.4);color:var(--danger)}
+  .btn.danger:hover{background:rgba(244,63,94,.14)}
+
+  .layout{display:grid;grid-template-columns:230px 1fr;min-height:calc(100vh - 64px)}
+  aside{border-right:1px solid var(--line);padding:16px 12px;background:rgba(8,13,24,.5)}
+  aside .tab{display:flex;align-items:center;gap:10px;width:100%;padding:11px 14px;border-radius:9px;border:none;background:transparent;color:var(--muted);font-size:14px;font-weight:600;cursor:pointer;text-align:left;transition:.15s;font-family:var(--sans);margin-bottom:2px}
+  aside .tab:hover{background:rgba(56,189,248,.07);color:var(--text)}
+  aside .tab.active{background:linear-gradient(135deg,rgba(34,211,238,.15),rgba(99,102,241,.15));color:var(--cyan);border:1px solid var(--line2)}
+  aside .tab .em{font-size:16px}
+
+  main{padding:26px;max-width:980px}
+  main h2{font-size:22px;margin-bottom:4px}
+  main .desc{color:var(--muted);font-size:13.5px;margin-bottom:22px}
+
+  .card{background:linear-gradient(180deg,rgba(15,26,46,.55),rgba(12,21,36,.35));border:1px solid var(--line);border-radius:16px;padding:22px;margin-bottom:18px}
+  .card h3{font-size:14px;font-family:var(--mono);color:var(--cyan);letter-spacing:.5px;text-transform:uppercase;margin-bottom:16px;display:flex;align-items:center;gap:8px}
+  .card h3 .line{flex:1;height:1px;background:var(--line)}
+
+  .f{margin-bottom:14px}
+  .f label{display:block;font-size:12px;color:var(--muted);margin-bottom:6px;font-weight:600}
+  .f input,.f textarea,.f select{width:100%;padding:11px 13px;border-radius:10px;border:1px solid var(--line2);background:rgba(9,16,28,.8);color:var(--text);font-size:14px;outline:none;font-family:var(--sans)}
+  .f textarea{resize:vertical;min-height:80px}
+  .f input:focus,.f textarea:focus,.f select:focus{border-color:var(--cyan);box-shadow:0 0 0 3px rgba(34,211,238,.1)}
+  .f small{display:block;color:var(--muted);font-size:11px;margin-top:5px}
+  .row{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px}
+
+  .item{border:1px dashed var(--line2);border-radius:12px;padding:16px;margin-bottom:14px;position:relative}
+  .item .it-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+  .item .it-head b{font-family:var(--mono);font-size:12px;color:var(--violet)}
+  .mini{display:inline-flex;align-items:center;gap:5px;padding:6px 11px;border-radius:8px;border:1px solid var(--line2);background:rgba(56,189,248,.07);color:var(--text);font-size:12px;font-weight:600;cursor:pointer;transition:.15s}
+  .mini:hover{border-color:var(--cyan)}
+  .mini.danger{border-color:rgba(244,63,94,.4);color:var(--danger)}
+  .mini.danger:hover{background:rgba(244,63,94,.12)}
+  .chip-row{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;align-items:center}
+  .chip-edit{display:inline-flex;align-items:center;gap:6px;background:rgba(56,189,248,.08);border:1px solid var(--line2);border-radius:999px;padding:5px 6px 5px 12px}
+  .chip-edit input{width:110px;background:transparent;border:none;outline:none;color:var(--text);font-size:13px}
+  .chip-edit button{width:20px;height:20px;border-radius:50%;border:none;background:rgba(244,63,94,.25);color:#fff;cursor:pointer;font-size:12px;line-height:1}
+
+  .avatar-wrap{display:flex;align-items:center;gap:18px}
+  .avatar-pre{width:90px;height:90px;border-radius:50%;object-fit:cover;background:#0a1220;border:2px solid var(--line2)}
+  .img-thumb{position:relative;display:inline-flex;width:74px;height:56px;border-radius:8px;overflow:hidden;border:1px solid var(--line2)}
+  .img-thumb img{width:100%;height:100%;object-fit:cover}
+  .img-thumb button{position:absolute;top:2px;right:2px;width:18px;height:18px;border-radius:50%;border:none;background:rgba(244,63,94,.85);color:#fff;font-size:11px;line-height:1;cursor:pointer}
+  .switch-row{display:flex;align-items:center;gap:8px;background:rgba(56,189,248,.06);border:1px solid var(--line2);border-radius:9px;padding:9px 12px;font-size:13px;font-weight:600;color:var(--text);cursor:pointer}
+  .switch-row input{accent-color:var(--cyan);width:16px;height:16px}
+  .toolbar{position:sticky;bottom:0;z-index:20;display:flex;gap:8px;flex-wrap:wrap;align-items:center;justify-content:center;padding:12px;background:rgba(5,7,13,.9);backdrop-filter:blur(10px);border-top:1px solid var(--line)}
+  .toast{position:fixed;top:70px;left:50%;transform:translateX(-50%) translateY(-12px);z-index:200;padding:11px 20px;border-radius:11px;background:rgba(8,13,24,.97);border:1px solid var(--line2);color:var(--green);font-family:var(--mono);font-size:13px;opacity:0;pointer-events:none;transition:.25s}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  .toast.err{color:var(--danger)}
+
+  @media(max-width:820px){
+    .layout{grid-template-columns:1fr}
+    aside{display:flex;flex-wrap:wrap;gap:4px;border-right:none;border-bottom:1px solid var(--line);padding:10px}
+    aside .tab{width:auto;flex:none}
+    .row,.row3{grid-template-columns:1fr}
+  }
+</style>
+</head>
+<body>
+
+<!-- ============ LOGIN ============ -->
+<div class="gate" id="gate">
+  <div class="gate-box">
+    <div class="lg">MM</div>
+    <h1>Portfolio Dashboard</h1>
+    <p>Enter the admin password to manage your portfolio</p>
+    <input type="password" id="passInput" placeholder="Password" autocomplete="current-password">
+    <button id="loginBtn">Enter Dashboard</button>
+    <div class="gate-err" id="gateErr"></div>
+  </div>
+</div>
+
+<!-- ============ APP ============ -->
+<div id="app">
+  <header>
+    <div class="brand"><span class="dot">MM</span><span>Portfolio Dashboard</span></div>
+    <div class="status" id="status">—</div>
+    <div class="hdr-btns">
+      <a class="btn ghost-link" href="index.html" target="_blank">↗ View portfolio</a>
+      <button class="btn primary" data-act="save">💾 Save</button>
+      <button class="btn danger" data-act="logout">Logout</button>
+    </div>
+  </header>
+
+  <div class="layout">
+    <aside id="tabs">
+      <button class="tab active" data-tab="hero"><span class="em">👤</span> Hero / Profile</button>
+      <button class="tab" data-tab="about"><span class="em">ℹ️</span> About</button>
+      <button class="tab" data-tab="education"><span class="em">🎓</span> Education</button>
+      <button class="tab" data-tab="experience"><span class="em">💼</span> Experience</button>
+      <button class="tab" data-tab="services"><span class="em">🧰</span> Services</button>
+      <button class="tab" data-tab="skills"><span class="em">🛠️</span> Skills</button>
+      <button class="tab" data-tab="projects"><span class="em">🚀</span> Projects</button>
+      <button class="tab" data-tab="certs"><span class="em">🏅</span> Certifications</button>
+      <button class="tab" data-tab="testimonials"><span class="em">💬</span> Testimonials</button>
+      <button class="tab" data-tab="contact"><span class="em">📬</span> Contact</button>
+      <button class="tab" data-tab="footer"><span class="em">📝</span> Footer</button>
+      <button class="tab" data-tab="custom"><span class="em">➕</span> Add Anything</button>
+      <button class="tab" data-tab="settings"><span class="em">⚙️</span> Settings</button>
+      <button class="tab" data-tab="preview"><span class="em">👁️</span> Preview</button>
+    </aside>
+    <main id="main"></main>
+  </div>
+
+  <div class="toolbar">
+    <button class="btn primary" data-act="save">💾 Save</button>
+    <button class="btn" data-act="export">⬇ Export JSON</button>
+    <button class="btn" data-act="import">⬆ Import JSON</button>
+    <button class="btn" data-act="download">📦 Download updated site</button>
+    <button class="btn danger" data-act="reset">↺ Reset to default</button>
+  </div>
+  <input type="file" id="importFile" accept="application/json" hidden>
+  <input type="file" id="photoFile" accept="image/*" hidden>
+  <input type="file" id="projImagesFile" accept="image/*" multiple hidden>
+  <input type="file" id="blockImageFile" accept="image/*" hidden>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* =====================================================================
+   DASHBOARD LOGIC
+===================================================================== */
+const STORE_KEY  = "mm_portfolio_content_v2";
+const PASS_KEY   = "mm_admin_pass";
+const AUTH_KEY   = "mm_admin_auth";
+const DEFAULT_PASS = "mena2026";
+
+function deepClone(x){ return JSON.parse(JSON.stringify(x)); }
+function deepMerge(base, over){
+  const o = Array.isArray(base) ? [] : {};
+  for(const k in base){
+    if(over && over[k] !== undefined && typeof over[k] === "object" && over[k] !== null && !Array.isArray(over[k]) && typeof base[k] === "object" && base[k] !== null && !Array.isArray(base[k])){ o[k] = deepMerge(base[k], over[k]); }
+    else if(over && over[k] !== undefined){ o[k] = deepClone(over[k]); }
+    else { o[k] = deepClone(base[k]); }
+  }
+  if(over){ for(const k in over){ if(base[k] === undefined){ o[k] = deepClone(over[k]); } } }
+  return o;
+}
+function esc(s){ return String(s == null ? "" : s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+function getPath(obj, path){ return path.split(".").reduce((o,k)=> (o && o[k] !== undefined) ? o[k] : undefined, obj); }
+function setPath(obj, path, val){
+  const ks = path.split("."); let o = obj;
+  for(let i=0;i<ks.length-1;i++){ if(o[ks[i]] === undefined) o[ks[i]] = {}; o = o[ks[i]]; }
+  o[ks[ks.length-1]] = val;
+}
+function storeGet(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } }
+function storeSet(k,v){ try{ localStorage.setItem(k,v); return true; }catch(e){ return false; } }
+function storeDel(k){ try{ localStorage.removeItem(k); return true; }catch(e){ return false; } }
+function sessGet(k){ try{ return sessionStorage.getItem(k); }catch(e){ return null; } }
+function sessSet(k,v){ try{ sessionStorage.setItem(k,v); return true; }catch(e){ return false; } }
+function sessDel(k){ try{ sessionStorage.removeItem(k); return true; }catch(e){ return false; } }
+
+const DEFAULT_CONTENT = {
+  brand: { name: "Mena Medhat", tag: "Mechatronics" },
+  hero: {
+    pill: "Open to internships & engineering opportunities",
+    hello: "Hi, I'm",
+    name: "Mena Medhat",
+    typePrefix: "I build",
+    typeWords: ["circuits & wiring","CAD & FEA models","automation workflows","intelligent systems"],
+    lead: "Mechatronics Engineering student blending electrical systems, CAD design, and automation into intelligent, real-world engineering solutions.",
+    tags: ["⚡ Circuits", "⚙ CAD / FEA", "🤖 Automation"],
+    stats: [
+      { value: "3.74", decimals: 2, label: "CGPA / 4.0 · Excellent" },
+      { value: "2",    decimals: 0, label: "Engineering Projects" },
+      { value: "4",    decimals: 0, label: "SOLIDWORKS Certs" },
+      { value: "9",    decimals: 0, label: "Software Tools" }
+    ]
+  },
+  about: {
+    eyebrow: "About Me",
+    title: "Engineering at the intersection of mechanics, electronics & control.",
+    sub: "Mechatronics Engineering student with a strong interest in electrical systems, circuit design, and the integration of mechanical and electronic technologies. I bring solid analytical and problem-solving skills backed by hands-on experience in electronics, CAD design, and technical project development.",
+    cards: [
+      { icon: "bolt",  title: "Electrical & Circuits", body: "Electrical wiring, electronics and PCB design — turning power and signals into reliable, safe, and well-integrated circuits." },
+      { icon: "gear",  title: "Mechanical & CAD",     body: "3D modeling, sheet metal and FEA simulation in SOLIDWORKS & AutoCAD — from concept sketch to manufacturable design." },
+      { icon: "robot", title: "Automation & Control", body: "Arduino, AI automation and workflow engineering with n8n — building intelligent systems that run themselves." }
+    ]
+  },
+  education: {
+    eyebrow: "Education", title: "Academic Background",
+    items: [
+      { title: "Assiut University — Faculty of Engineering", role: "B.Sc. in Mechatronics Engineering", when: "2024 – 2029", grade: "🏆 CGPA 3.74 / 4.0 — Grade: Excellent",
+        bullets: ["Focused coursework in electrical systems, circuit design, mechanics, and control engineering.","Hands-on labs in electronics, CAD modeling, and technical project development."] }
+    ]
+  },
+  experience: {
+    eyebrow: "Experience", title: "Where I've Applied It",
+    items: [
+      { title: "ASME Asyut Student Section", role: "Mechanical Design & Technical Member", when: "2026 – Present", grade: "",
+        bullets: ["Gained hands-on experience in mechanical design using SOLIDWORKS through practical modeling work.","Studied core engineering topics — gears, materials, and fasteners — and produced technical reports that strengthened analytical and documentation skills."] }
+    ]
+  },
+  skills: {
+    eyebrow: "Skills", title: "Toolbox & Expertise", sub: "A balanced stack across hardware, software, and soft skills.",
+    groups: [
+      { icon: "bolt",  title: "Technical",   chips: ["Electrical Wiring","Electronics","Mechanical Design","FEA","Sheet Metal","PCB Design","AI Automation"] },
+      { icon: "code",  title: "Software",    chips: ["SOLIDWORKS","AutoCAD","Ansys","Arduino IDE","MATLAB","C++","Python","KiCad","n8n"] },
+      { icon: "users", title: "Soft Skills", chips: ["Problem Solving","Analytical Thinking","Teamwork","Continuous Learning"] },
+      { icon: "globe", title: "Languages",   chips: ["Arabic — Native","English — Professional"] }
+    ]
+  },
+  projects: {
+    eyebrow: "Projects", title: "Selected Work", sub: "Real projects where I designed, wired, and automated.",
+    items: [
+      { title: "Fire Fighting Car", year: "2026", tag: "Hardware", role: "Role: Electrical Wiring & Connections", visual: "fire",
+        bullets: ["Designed and executed the full electrical wiring and connection layout for a fire-fighting vehicle model.","Ensured reliable power distribution and safe integration between motors, actuators, and control modules.","Practiced real circuit-level troubleshooting and cable routing discipline."],
+        github: "https://github.com/mena24242", demo: "#", code: "", images: [] },
+      { title: "Bus Management System", year: "2026", tag: "Automation", role: "Role: Automation & Workflow Developer", visual: "bus",
+        bullets: ["Developed an automated bus-management workflow that streamlines routing and scheduling logic.","Reduced manual coordination overhead by automating repetitive operational steps.","Explored workflow automation tools (n8n) and data flow design."],
+        github: "https://github.com/mena24242", demo: "#", code: "", images: [] }
+    ]
+  },
+  certifications: {
+    eyebrow: "Certifications & Awards", title: "Credentials",
+    sub: "Certified in industry-standard engineering tools by Dassault Systèmes.",
+    certs: [
+      { code: "CSWA",     issuer: "Dassault Systèmes", desc: "Certified SOLIDWORKS Associate — 3D modeling fundamentals.", link: "" },
+      { code: "CSWP",     issuer: "Dassault Systèmes", desc: "Certified SOLIDWORKS Professional — advanced part & assembly design.", link: "" },
+      { code: "CSWPA-SM", issuer: "Dassault Systèmes", desc: "Sheet Metal — specialized sheet-metal design certification.", link: "" },
+      { code: "CSWA-S",   issuer: "Dassault Systèmes", desc: "Simulation — FEA & engineering analysis fundamentals.", link: "" }
+    ]
+  },
+  contact: {
+    eyebrow: "Contact", title: "Let's Build Something",
+    sub: "Have a project, internship, or idea? My inbox is always open.",
+    email: "menamedhat242006@gmail.com",
+    phone: "+201204885035", phoneDisplay: "+20 120 488 5035",
+    linkedin: "linkedin.com/in/mena-medhat-b38093370",
+    linkedinUrl: "https://www.linkedin.com/in/mena-medhat-b38093370",
+    github: "github.com/mena24242",
+    githubUrl: "https://github.com/mena24242",
+    location: "Sohag, Egypt",
+    formspree: ""
+  },
+  footer: {
+    line1: "© 2026 Mena Medhat · Mechatronics Engineering · Sohag, Egypt",
+    line2: "Designed & built with ♥ — mechanics × electronics × control"
+  },
+  services: {
+    eyebrow: "Services", title: "What I Do",
+    sub: "Practical engineering services I can deliver end-to-end.",
+    items: [
+      { icon: "bolt",  title: "Electrical Wiring",     body: "Clean, safe and reliable wiring and connection layouts for models and prototypes." },
+      { icon: "code",  title: "PCB Design",            body: "Schematic capture and board layout in KiCad, from idea to manufacturable board." },
+      { icon: "gear",  title: "Mechanical & CAD Design", body: "3D parts, assemblies and sheet-metal design in SOLIDWORKS and AutoCAD." },
+      { icon: "cert",  title: "FEA & Simulation",      body: "Stress and structural analysis using Ansys and SOLIDWORKS Simulation." },
+      { icon: "robot", title: "Automation Workflows",  body: "Automated processes and AI workflows built with n8n, Arduino and Python." },
+      { icon: "users", title: "Technical Documentation", body: "Clear engineering reports and documentation for teams and stakeholders." }
+    ]
+  },
+  testimonials: {
+    eyebrow: "Testimonials", title: "What People Say",
+    sub: "Recommendations from mentors and teammates.",
+    items: [
+      { name: "Your Name Here", role: "Role / Organization", text: "Replace this with a real recommendation from a mentor or teammate — edit it from the dashboard." }
+    ]
+  },
+  settings: {
+    accent: "cyan",
+    sections: {
+      about: true, education: true, experience: true, services: true,
+      skills: true, projects: true, certifications: true, testimonials: false, contact: true
+    }
+  },
+  custom: {
+    sections: []
+  }
+};
+
+let CONTENT = loadContent();
+let currentTab = 'hero';
+let dirty = false;
+
+function loadContent(){
+  const s = storeGet(STORE_KEY);
+  if(s){ try{ return deepMerge(deepClone(DEFAULT_CONTENT), JSON.parse(s)); }catch(e){} }
+  return deepClone(DEFAULT_CONTENT);
+}
+
+/* =====================================================================
+   FORM BUILDERS
+===================================================================== */
+const ICON_OPTS = ["bolt","gear","robot","code","users","globe","cert"];
+const ACCENT_OPTS = [
+  {v:"cyan",    l:"Cyan (default)"},
+  {v:"emerald", l:"Emerald"},
+  {v:"violet",  l:"Violet"},
+  {v:"amber",   l:"Amber"},
+  {v:"rose",    l:"Rose"}
+];
+const VISUAL_OPTS = [
+  {v:"fire", l:"fire — Fire truck (has photo gallery)"},
+  {v:"bus",  l:"bus — Bus illustration"},
+  {v:"generic", l:"generic — Simple device illustration"}
+];
+
+function field(label, path, opts){
+  opts = opts || {};
+  const v = getPath(CONTENT, path);
+  const valStr = v == null ? "" : String(v);
+  let inp;
+  if(opts.type === 'textarea'){
+    inp = '<textarea data-path="'+path+'" rows="'+(opts.rows||3)+'">'+esc(valStr)+'</textarea>';
+  } else if(opts.type === 'select'){
+    inp = '<select data-path="'+path+'">'+opts.options.map(o=>{
+      const val = typeof o === 'object' ? o.v : o;
+      const lab = typeof o === 'object' ? o.l : o;
+      return '<option value="'+esc(val)+'"'+(String(v)===val?' selected':'')+'>'+esc(lab)+'</option>';
+    }).join('')+'</select>';
+  } else {
+    inp = '<input data-path="'+path+'" value="'+esc(valStr)+'"'+(opts.csv?' data-csv="1"':'')+(opts.placeholder?' placeholder="'+esc(opts.placeholder)+'"':'')+'>';
+  }
+  return '<div class="f"><label>'+esc(label)+'</label>'+inp+(opts.hint?'<small>'+esc(opts.hint)+'</small>':'')+'</div>';
+}
+
+function bulletsEditor(arrKey, i){
+  const arr = getPath(CONTENT, arrKey) || [];
+  const b = arr[i] ? (arr[i].bullets||[]) : [];
+  const rows = b.map((x,j)=>(
+    '<div class="f" style="margin-bottom:8px;display:flex;gap:8px">'+
+      '<input data-path="'+arrKey+'.'+i+'.bullets.'+j+'" value="'+esc(x)+'" style="flex:1">'+
+      '<button class="mini danger" data-act="del-bullet" data-arr="'+arrKey+'" data-i="'+i+'" data-b="'+j+'">×</button>'+
+    '</div>'
+  )).join('');
+  return rows + '<button class="mini" data-act="add-bullet" data-arr="'+arrKey+'" data-i="'+i+'">+ Add point</button>';
+}
+
+function itemHeader(label, act, arrKey, i){
+  return '<div class="it-head"><b>'+esc(label)+'</b>'+
+    '<span style="display:flex;gap:6px">'+
+      '<button class="mini" data-act="move" data-arr="'+arrKey+'" data-i="'+i+'" data-dir="-1" title="Move up">↑</button>'+
+      '<button class="mini" data-act="move" data-arr="'+arrKey+'" data-i="'+i+'" data-dir="1" title="Move down">↓</button>'+
+      '<button class="mini danger" data-act="'+act+'" data-arr="'+arrKey+'" data-i="'+i+'">🗑 Remove</button>'+
+    '</span></div>';
+}
+
+/* =====================================================================
+   TAB RENDERERS
+===================================================================== */
+function renderHero(){
+  const h = CONTENT.hero;
+  const stats = h.stats.map((s,i)=>(
+    '<div class="item">'+itemHeader('Stat '+(i+1),'del-stat','hero.stats',i)+
+      '<div class="row3">'+
+        field('Value','hero.stats.'+i+'.value')+
+        field('Decimals (0-2)','hero.stats.'+i+'.decimals')+
+        field('Label','hero.stats.'+i+'.label')+
+      '</div>'+
+    '</div>'
+  )).join('');
+  const tags = h.tags.map((tg,i)=>(
+    '<div class="f" style="margin-bottom:8px;display:flex;gap:8px">'+
+      '<input data-path="hero.tags.'+i+'" value="'+esc(tg)+'" style="flex:1">'+
+      '<button class="mini danger" data-act="del-tag" data-i="'+i+'">×</button>'+
+    '</div>'
+  )).join('');
+  const avatarSrc = CONTENT.hero.avatar || '';
+  return '<h2>Hero / Profile</h2><div class="desc">Name, headline, stats and photo shown at the top of the site.</div>'+
+    '<div class="card"><h3>Brand & identity<span class="line"></span></h3>'+
+      '<div class="row">'+field('Brand name','brand.name')+field('Brand tag (small text)','brand.tag')+'</div>'+
+    '</div>'+
+    '<div class="card"><h3>Headline<span class="line"></span></h3>'+
+      field('Availability pill','hero.pill')+
+      '<div class="row">'+field('Greeting ("Hi, I\'m")','hero.hello')+field('Full name','hero.name')+'</div>'+
+      field('Typing prefix ("I build")','hero.typePrefix')+
+      field('Typing words (comma separated)','hero.typeWords',{csv:true, hint:'Words that rotate after "I build", e.g. circuits & wiring, CAD models'})+
+      field('Intro paragraph','hero.lead',{type:'textarea',rows:3})+
+    '</div>'+
+    '<div class="card"><h3>Photo<span class="line"></span></h3>'+
+      '<div class="avatar-wrap">'+
+        (avatarSrc ? '<img class="avatar-pre" src="'+avatarSrc+'" alt="">' : '<div class="avatar-pre" style="display:grid;place-items:center;font-size:11px;color:var(--muted);text-align:center;padding:8px">Default photo</div>')+
+        '<div style="display:flex;flex-direction:column;gap:8px">'+
+          '<button class="mini" data-act="change-photo">🖼 Upload photo</button>'+
+          (avatarSrc ? '<button class="mini danger" data-act="remove-photo">Remove custom photo</button>' : '')+
+          '<small style="color:var(--muted);font-size:11px">Square photo works best. Leave empty to use the embedded default.</small>'+
+        '</div>'+
+      '</div>'+
+    '</div>'+
+    '<div class="card"><h3>Floating tags<span class="line"></span></h3>'+tags+
+    '<button class="mini" data-act="add-tag">+ Add tag</button></div>'+
+    '<div class="card"><h3>Stats<span class="line"></span></h3>'+stats+'<button class="mini" data-act="add-stat">+ Add stat</button></div>';
+}
+
+function renderAbout(){
+  const cards = CONTENT.about.cards.map((c,i)=>(
+    '<div class="item">'+itemHeader('Card '+(i+1),'del-item','about.cards',i)+
+      '<div class="row">'+field('Icon','about.cards.'+i+'.icon',{type:'select',options:ICON_OPTS})+field('Title','about.cards.'+i+'.title')+'</div>'+
+      field('Text','about.cards.'+i+'.body',{type:'textarea',rows:3})+
+    '</div>'
+  )).join('');
+  return '<h2>About</h2><div class="desc">The about section with 3 highlight cards.</div>'+
+    '<div class="card"><h3>Section header<span class="line"></span></h3>'+
+      field('Eyebrow','about.eyebrow')+
+      field('Title','about.title')+
+      field('Subtitle','about.sub',{type:'textarea',rows:3})+
+    '</div>'+
+    '<div class="card"><h3>Cards<span class="line"></span></h3>'+cards+'<button class="mini" data-act="add-item" data-arr="about.cards">+ Add card</button></div>';
+}
+
+function timelineTab(key, title, desc){
+  const s = CONTENT[key];
+  const items = (s.items||[]).map((it,i)=>(
+    '<div class="item">'+itemHeader('Item '+(i+1),'del-item',key+'.items',i)+
+      '<div class="row">'+field('Title',''+key+'.items.'+i+'.title')+field('Role / subtitle',''+key+'.items.'+i+'.role')+'</div>'+
+      '<div class="row">'+field('Period (when)',''+key+'.items.'+i+'.when')+field('Grade badge (optional)',''+key+'.items.'+i+'.grade')+'</div>'+
+      '<label style="display:block;font-size:12px;color:var(--muted);margin:8px 0 6px;font-weight:600">Bullet points</label>'+
+      bulletsEditor(key+'.items', i)+
+    '</div>'
+  )).join('');
+  return '<h2>'+esc(title)+'</h2><div class="desc">'+esc(desc)+'</div>'+
+    '<div class="card"><h3>Section header<span class="line"></span></h3>'+
+      field('Eyebrow',''+key+'.eyebrow')+
+      field('Title',''+key+'.title')+
+    '</div>'+
+    '<div class="card"><h3>Items<span class="line"></span></h3>'+items+'<button class="mini" data-act="add-item" data-arr="'+key+'.items">+ Add item</button></div>';
+}
+
+function renderSkills(){
+  const groups = CONTENT.skills.groups.map((g,gi)=>(
+    '<div class="item">'+itemHeader('Group: '+g.title,'del-item','skills.groups',gi)+
+      '<div class="row">'+field('Icon','skills.groups.'+gi+'.icon',{type:'select',options:ICON_OPTS})+field('Group title','skills.groups.'+gi+'.title')+'</div>'+
+      '<label style="display:block;font-size:12px;color:var(--muted);margin:8px 0 6px;font-weight:600">Skills</label>'+
+      '<div class="chip-row">'+
+        g.chips.map((c,ci)=>(
+          '<span class="chip-edit"><input data-path="skills.groups.'+gi+'.chips.'+ci+'" value="'+esc(c)+'">'+
+          '<button data-act="del-chip" data-g="'+gi+'" data-i="'+ci+'">×</button></span>'
+        )).join('')+
+        '<button class="mini" data-act="add-chip" data-g="'+gi+'">+</button>'+
+      '</div>'+
+    '</div>'
+  )).join('');
+  return '<h2>Skills</h2><div class="desc">Skill groups shown as chips. Groups named "Soft Skills" and "Languages" get special colors.</div>'+
+    '<div class="card"><h3>Section header<span class="line"></span></h3>'+
+      field('Eyebrow','skills.eyebrow')+
+      field('Title','skills.title')+
+      field('Subtitle','skills.sub')+
+    '</div>'+
+    '<div class="card"><h3>Groups<span class="line"></span></h3>'+groups+'<button class="mini" data-act="add-item" data-arr="skills.groups">+ Add group</button></div>';
+}
+
+function renderProjects(){
+  const items = CONTENT.projects.items.map((pr,i)=>(
+    '<div class="item">'+itemHeader('Project: '+pr.title,'del-item','projects.items',i)+
+      '<div class="row">'+field('Title','projects.items.'+i+'.title')+field('Year','projects.items.'+i+'.year')+'</div>'+
+      '<div class="row">'+field('Tag (category)','projects.items.'+i+'.tag')+field('Role','projects.items.'+i+'.role')+'</div>'+
+      field('Visual','projects.items.'+i+'.visual',{type:'select',options:VISUAL_OPTS,hint:'Only "fire" has an embedded photo gallery.'})+
+      '<div class="row">'+field('Source link (GitHub)','projects.items.'+i+'.github')+field('Demo link','projects.items.'+i+'.demo')+'</div>'+
+      '<label style="display:block;font-size:12px;color:var(--muted);margin:8px 0 6px;font-weight:600">Gallery photos</label>'+
+      '<div class="chip-row" style="margin-bottom:8px">'+
+        (pr.images||[]).map((img,ji)=> '<span class="img-thumb"><img src="'+img+'" alt=""><button data-act="del-img" data-i="'+i+'" data-j="'+ji+'">×</button></span>').join('')+
+        '<button class="mini" data-act="add-img" data-i="'+i+'">🖼 + Add photos</button>'+
+      '</div>'+
+      '<small style="color:var(--muted);font-size:11px;display:block;margin-bottom:10px">Photos you add here override the default illustration.</small>'+
+      '<label style="display:block;font-size:12px;color:var(--muted);margin:8px 0 6px;font-weight:600">Bullet points</label>'+
+      bulletsEditor('projects.items', i)+
+      field('Project code (Arduino / C++ / Python…)','projects.items.'+i+'.code',{type:'textarea',rows:4,hint:'Shows a "Code" button on the project card when filled.'})+
+    '</div>'
+  )).join('');
+  return '<h2>Projects</h2><div class="desc">Your project showcase. Each project can have bullets, links and code.</div>'+
+    '<div class="card"><h3>Section header<span class="line"></span></h3>'+
+      field('Eyebrow','projects.eyebrow')+
+      field('Title','projects.title')+
+      field('Subtitle','projects.sub')+
+    '</div>'+
+    '<div class="card"><h3>Projects<span class="line"></span></h3>'+items+'<button class="mini" data-act="add-item" data-arr="projects.items">+ Add project</button></div>';
+}
+
+function renderCerts(){
+  const items = CONTENT.certifications.certs.map((c,i)=>(
+    '<div class="item">'+itemHeader('Cert: '+c.code,'del-item','certifications.certs',i)+
+      '<div class="row">'+field('Code (CSWA…)','certifications.certs.'+i+'.code')+field('Issuer','certifications.certs.'+i+'.issuer')+'</div>'+
+      field('Description','certifications.certs.'+i+'.desc',{type:'textarea',rows:2})+
+      field('Verification link (optional)','certifications.certs.'+i+'.link',{hint:'Shows a "Verify credential" link on the card when filled (e.g. Dassault virtualtester URL).'})+
+    '</div>'
+  )).join('');
+  return '<h2>Certifications</h2><div class="desc">Certifications and awards shown as cards.</div>'+
+    '<div class="card"><h3>Section header<span class="line"></span></h3>'+
+      field('Eyebrow','certifications.eyebrow')+
+      field('Title','certifications.title')+
+      field('Subtitle','certifications.sub')+
+    '</div>'+
+    '<div class="card"><h3>Certifications<span class="line"></span></h3>'+items+'<button class="mini" data-act="add-item" data-arr="certifications.certs">+ Add certification</button></div>';
+}
+
+function renderContact(){
+  return '<h2>Contact</h2><div class="desc">Your contact details. The phone number powers Call and WhatsApp buttons.</div>'+
+    '<div class="card"><h3>Section header<span class="line"></span></h3>'+
+      field('Eyebrow','contact.eyebrow')+
+      field('Title','contact.title')+
+      field('Subtitle','contact.sub',{type:'textarea',rows:2})+
+    '</div>'+
+    '<div class="card"><h3>Details<span class="line"></span></h3>'+
+      field('Email','contact.email')+
+      '<div class="row">'+
+        field('Phone (digits, for call/WhatsApp)','contact.phone',{hint:'e.g. +201204885035'})+
+        field('Phone display text','contact.phoneDisplay',{hint:'e.g. +20 120 488 5035'})+
+      '</div>'+
+      '<div class="row">'+
+        field('LinkedIn display text','contact.linkedin')+
+        field('LinkedIn URL','contact.linkedinUrl')+
+      '</div>'+
+      '<div class="row">'+
+        field('GitHub display text','contact.github')+
+        field('GitHub URL','contact.githubUrl')+
+      '</div>'+
+      field('Location','contact.location')+
+      field('Formspree form ID (for real messages)','contact.formspree',{hint:'Get a free form ID from formspree.io — leave empty to use the email (mailto) fallback.'})+
+    '</div>';
+}
+
+function renderFooter(){
+  return '<h2>Footer</h2><div class="desc">Text at the bottom of the page.</div>'+
+    '<div class="card"><h3>Footer lines<span class="line"></span></h3>'+
+      field('Line 1','footer.line1')+
+      field('Line 2','footer.line2')+
+    '</div>';
+}
+
+function renderServices(){
+  const items = (CONTENT.services.items||[]).map((c,i)=>(
+    '<div class="item">'+itemHeader('Service '+(i+1),'del-item','services.items',i)+
+      '<div class="row">'+field('Icon','services.items.'+i+'.icon',{type:'select',options:ICON_OPTS})+field('Title','services.items.'+i+'.title')+'</div>'+
+      field('Text','services.items.'+i+'.body',{type:'textarea',rows:2})+
+    '</div>'
+  )).join('');
+  return '<h2>Services</h2><div class="desc">What you offer, shown as a 3-column grid.</div>'+
+    '<div class="card"><h3>Section header<span class="line"></span></h3>'+
+      field('Eyebrow','services.eyebrow')+
+      field('Title','services.title')+
+      field('Subtitle','services.sub')+
+    '</div>'+
+    '<div class="card"><h3>Services<span class="line"></span></h3>'+items+'<button class="mini" data-act="add-item" data-arr="services.items">+ Add service</button></div>';
+}
+
+function renderTestimonials(){
+  const items = (CONTENT.testimonials.items||[]).map((c,i)=>(
+    '<div class="item">'+itemHeader('Testimonial '+(i+1),'del-item','testimonials.items',i)+
+      field('Name','testimonials.items.'+i+'.name')+
+      field('Role / Organization','testimonials.items.'+i+'.role')+
+      field('Text','testimonials.items.'+i+'.text',{type:'textarea',rows:3})+
+    '</div>'
+  )).join('');
+  return '<h2>Testimonials</h2><div class="desc">Recommendations from mentors and teammates. This section is hidden by default — enable it in Settings once you fill real content.</div>'+
+    '<div class="card"><h3>Section header<span class="line"></span></h3>'+
+      field('Eyebrow','testimonials.eyebrow')+
+      field('Title','testimonials.title')+
+      field('Subtitle','testimonials.sub')+
+    '</div>'+
+    '<div class="card"><h3>Testimonials<span class="line"></span></h3>'+items+'<button class="mini" data-act="add-item" data-arr="testimonials.items">+ Add testimonial</button></div>';
+}
+
+function defaultBlock(type){
+  if(type === 'paragraph') return { type:'paragraph', title:'', text:'' };
+  if(type === 'cards') return { type:'cards', items:[{icon:'gear', title:'New card', text:''}] };
+  if(type === 'chips') return { type:'chips', items:['New tag'] };
+  if(type === 'link') return { type:'link', title:'Button label', url:'#' };
+  if(type === 'image') return { type:'image', title:'', src:'' };
+  return { type:'paragraph', title:'', text:'' };
+}
+
+function blockEditor(si, bi, b){
+  const labels = { paragraph:'📝 Text', cards:'🃏 Cards', chips:'🏷️ Tags', link:'🔗 Link', image:'🖼️ Image' };
+  const head = '<div class="it-head"><b>'+(labels[b.type]||b.type)+'</b>'+
+    '<span style="display:flex;gap:6px">'+
+      '<button class="mini" data-act="move-block" data-si="'+si+'" data-bi="'+bi+'" data-dir="-1">↑</button>'+
+      '<button class="mini" data-act="move-block" data-si="'+si+'" data-bi="'+bi+'" data-dir="1">↓</button>'+
+      '<button class="mini danger" data-act="del-block" data-si="'+si+'" data-bi="'+bi+'">×</button>'+
+    '</span></div>';
+  let body = '';
+  if(b.type === 'paragraph'){
+    body = field('Title (optional)','custom.sections.'+si+'.blocks.'+bi+'.title')+
+           field('Text','custom.sections.'+si+'.blocks.'+bi+'.text',{type:'textarea',rows:3});
+  } else if(b.type === 'cards'){
+    body = '<label style="display:block;font-size:12px;color:var(--muted);margin:8px 0 6px;font-weight:600">Cards</label>'+
+      (b.items||[]).map((c,ci)=>(
+        '<div class="item" style="padding:10px;margin-bottom:8px">'+
+          '<div class="it-head"><b>Card '+(ci+1)+'</b>'+
+            '<button class="mini danger" data-act="del-card" data-si="'+si+'" data-bi="'+bi+'" data-ci="'+ci+'">×</button></div>'+
+          '<div class="row">'+
+            field('Icon','custom.sections.'+si+'.blocks.'+bi+'.items.'+ci+'.icon',{type:'select',options:ICON_OPTS})+
+            field('Title','custom.sections.'+si+'.blocks.'+bi+'.items.'+ci+'.title')+
+          '</div>'+
+          field('Text','custom.sections.'+si+'.blocks.'+bi+'.items.'+ci+'.text',{type:'textarea',rows:2})+
+        '</div>'
+      )).join('')+
+      '<button class="mini" data-act="add-card" data-si="'+si+'" data-bi="'+bi+'">+ Add card</button>';
+  } else if(b.type === 'chips'){
+    body = '<div class="chip-row" style="margin-top:0">'+
+      (b.items||[]).map((c,ci)=>(
+        '<span class="chip-edit"><input data-path="custom.sections.'+si+'.blocks.'+bi+'.items.'+ci+'" value="'+esc(c)+'">'+
+        '<button data-act="del-chip-block" data-si="'+si+'" data-bi="'+bi+'" data-ci="'+ci+'">×</button></span>'
+      )).join('')+
+      '<button class="mini" data-act="add-chip-block" data-si="'+si+'" data-bi="'+bi+'">+</button></div>';
+  } else if(b.type === 'link'){
+    body = '<div class="row">'+
+      field('Button label','custom.sections.'+si+'.blocks.'+bi+'.title')+
+      field('URL','custom.sections.'+si+'.blocks.'+bi+'.url')+
+    '</div>';
+  } else if(b.type === 'image'){
+    body = '<div class="avatar-wrap">'+
+      (b.src ? '<img class="avatar-pre" style="border-radius:12px" src="'+b.src+'" alt="">' :
+               '<div class="avatar-pre" style="border-radius:12px;display:grid;place-items:center;font-size:11px;color:var(--muted);padding:8px">No image</div>')+
+      '<div style="display:flex;flex-direction:column;gap:8px">'+
+        '<button class="mini" data-act="upload-block-image" data-si="'+si+'" data-bi="'+bi+'">🖼 Upload image</button>'+
+        (b.src ? '<button class="mini danger" data-act="remove-block-image" data-si="'+si+'" data-bi="'+bi+'">Remove</button>' : '')+
+      '</div></div>'+
+      field('Caption (optional)','custom.sections.'+si+'.blocks.'+bi+'.title');
+  }
+  return '<div class="item" style="padding:12px;border-style:solid">'+head+body+'</div>';
+}
+
+function renderCustom(){
+  const cs = CONTENT.custom || { sections: [] };
+  const secs = (cs.sections||[]).map((s,si)=>(
+    '<div class="item">'+
+      '<div class="it-head"><b>Section: '+(s.title || ('#'+(si+1)))+'</b>'+
+        '<span style="display:flex;gap:6px">'+
+          '<button class="mini" data-act="move-section" data-si="'+si+'" data-dir="-1">↑</button>'+
+          '<button class="mini" data-act="move-section" data-si="'+si+'" data-dir="1">↓</button>'+
+          '<button class="mini danger" data-act="del-section" data-si="'+si+'">🗑</button>'+
+        '</span></div>'+
+      '<div class="row">'+
+        field('Eyebrow','custom.sections.'+si+'.eyebrow')+
+        field('Title','custom.sections.'+si+'.title')+
+      '</div>'+
+      field('Subtitle','custom.sections.'+si+'.sub')+
+      '<label class="switch-row" style="margin-bottom:14px"><input type="checkbox" data-path="custom.sections.'+si+'.visible"'+(s.visible!==false?' checked':'')+'><span>Visible on page</span></label>'+
+      '<label style="display:block;font-size:12px;color:var(--muted);margin:8px 0 6px;font-weight:600">Content blocks</label>'+
+      (s.blocks||[]).map((b,bi)=>blockEditor(si,bi,b)).join('')+
+      '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px">'+
+        '<button class="mini" data-act="add-block" data-si="'+si+'" data-type="paragraph">+ 📝 Text</button>'+
+        '<button class="mini" data-act="add-block" data-si="'+si+'" data-type="cards">+ 🃏 Cards</button>'+
+        '<button class="mini" data-act="add-block" data-si="'+si+'" data-type="chips">+ 🏷️ Tags</button>'+
+        '<button class="mini" data-act="add-block" data-si="'+si+'" data-type="link">+ 🔗 Link</button>'+
+        '<button class="mini" data-act="add-block" data-si="'+si+'" data-type="image">+ 🖼️ Image</button>'+
+      '</div>'+
+    '</div>'
+  )).join('');
+  return '<h2>➕ Add Anything</h2><div class="desc">Build your own sections with any content — text, cards, tags, links and images. They appear before the Contact section.</div>'+
+    '<div class="card"><h3>Custom sections<span class="line"></span></h3>'+
+    (secs || '<p style="color:var(--muted);font-size:13px;margin-bottom:12px">No custom sections yet — click "+ Add section" to create your first one.</p>')+
+    '<button class="mini" data-act="add-section">+ Add section</button></div>';
+}
+
+function renderPreview(){
+  return '<h2>Live Preview</h2><div class="desc">This is how the portfolio looks right now. Save your edits first, then click the refresh button below.</div>'+
+    '<div class="card" style="padding:8px">'+
+      '<div style="display:flex;gap:8px;margin-bottom:8px;align-items:center;flex-wrap:wrap">'+
+        '<button class="btn primary" data-act="refresh-preview">↻ Refresh preview</button>'+
+        '<a class="btn" href="index.html" target="_blank">↗ Open in new tab</a>'+
+        '<button class="btn" data-act="toggle-mobile" id="mobileToggleBtn">📱 Mobile view</button>'+
+      '</div>'+
+      '<div style="display:flex;justify-content:center">'+
+        '<iframe id="previewFrame" src="index.html" style="width:100%;height:72vh;border:1px solid var(--line2);border-radius:10px;background:#05070d;transition:width .3s ease"></iframe>'+
+      '</div>'+
+    '</div>';
+}
+
+function renderSettings(){
+  return '<h2>Settings</h2><div class="desc">Appearance, password, data and publishing.</div>'+
+    '<div class="card"><h3>Appearance<span class="line"></span></h3>'+
+      field('Accent color','settings.accent',{type:'select',options:ACCENT_OPTS,hint:'Changes the main color of the portfolio page (save + refresh preview).'})+
+    '</div>'+
+    '<div class="card"><h3>Change password<span class="line"></span></h3>'+
+      '<div class="row">'+
+        '<div class="f"><label>New password (min 4 chars)</label><input id="newPass" type="text" placeholder="New password"></div>'+
+        '<div style="display:flex;align-items:flex-end"><button class="btn" data-act="change-pass">Update password</button></div>'+
+      '</div>'+
+      '<small style="color:var(--muted);font-size:11px">Default password is <b style="color:var(--cyan)">mena2026</b>. Stored in this browser only.</small>'+
+    '</div>'+
+    '<div class="card"><h3>Data & publishing<span class="line"></span></h3>'+
+      '<p style="color:var(--muted);font-size:13px;margin-bottom:14px">'+
+        '💾 <b>Save</b> stores your edits in this browser — the portfolio (index.html) on the same website picks them up automatically.<br>'+
+        '📦 <b>Download updated site</b> bakes your edits into a new index.html you can deploy anywhere (GitHub Pages, Netlify…).<br>'+
+        '⬇ <b>Export JSON</b> saves a backup file. ⬆ <b>Import</b> restores it.</p>'+
+      '<div style="display:flex;gap:8px;flex-wrap:wrap">'+
+        '<button class="btn primary" data-act="download">📦 Download updated site</button>'+
+        '<button class="btn" data-act="export">⬇ Export JSON</button>'+
+        '<button class="btn" data-act="import">⬆ Import JSON</button>'+
+        '<button class="btn danger" data-act="reset">↺ Reset to default</button>'+
+      '</div>'+
+    '</div>'+
+    '<div class="card"><h3>Show / hide sections<span class="line"></span></h3>'+
+      '<p style="color:var(--muted);font-size:13px;margin-bottom:12px">Toggle which sections appear on the portfolio page.</p>'+
+      '<div class="row">'+
+        Object.keys(CONTENT.settings.sections).map(key=>(
+          '<label class="switch-row"><input type="checkbox" data-section="'+key+'"'+(CONTENT.settings.sections[key]?' checked':'')+'><span>'+esc(key.charAt(0).toUpperCase()+key.slice(1))+'</span></label>'
+        )).join('')+
+      '</div>'+
+    '</div>';
+}
+
+const RENDERERS = { hero:renderHero, about:renderAbout, education:function(){return timelineTab('education','Education','Academic background.');}, experience:function(){return timelineTab('experience','Experience','Work & activities.');}, services:renderServices, skills:renderSkills, projects:renderProjects, certs:renderCerts, testimonials:renderTestimonials, contact:renderContact, footer:renderFooter, custom:renderCustom, settings:renderSettings, preview:renderPreview };
+
+function renderTab(tab){
+  currentTab = tab;
+  document.querySelectorAll('#tabs .tab').forEach(b=> b.classList.toggle('active', b.dataset.tab === tab));
+  document.getElementById('main').innerHTML = RENDERERS[tab] ? RENDERERS[tab]() : '';
+}
+
+/* =====================================================================
+   LIVE BINDING + ACTIONS
+===================================================================== */
+document.getElementById('main').addEventListener('input', function(e){
+  const t = e.target;
+  if(!t.dataset.path) return;
+  if(t.type === 'checkbox'){ setPath(CONTENT, t.dataset.path, t.checked); markDirty(); return; }
+  const val = t.value;
+  if(t.dataset.csv !== undefined){
+    setPath(CONTENT, t.dataset.path, val.split(',').map(s=>s.trim()).filter(Boolean));
+  } else {
+    setPath(CONTENT, t.dataset.path, val);
+  }
+  markDirty();
+});
+
+function markDirty(){
+  dirty = true;
+  const st = document.getElementById('status');
+  st.textContent = 'Unsaved changes';
+  st.classList.add('dirty');
+}
+function markSaved(){
+  dirty = false;
+  const st = document.getElementById('status');
+  st.textContent = 'All changes saved';
+  st.classList.remove('dirty');
+}
+
+function defaultItemFor(arrKey){
+  if(arrKey === 'projects.items') return { title:'New Project', year:'2026', tag:'Category', role:'Role: your role', visual:'generic', bullets:['Short description of the project.'], github:'#', demo:'#', code:'' };
+  if(arrKey === 'certifications.certs') return { code:'CODE', issuer:'Issuer', desc:'Short description.' };
+  if(arrKey === 'about.cards') return { icon:'gear', title:'New Card', body:'Short description.' };
+  if(arrKey === 'skills.groups') return { icon:'code', title:'New Group', chips:['New Skill'] };
+  return { title:'New Entry', role:'Role / Position', when:'2026', grade:'', bullets:['Describe this item.'] };
+}
+
+document.addEventListener('click', function(e){
+  const b = e.target.closest('[data-act], [data-tab]');
+  if(!b) return;
+
+  if(b.dataset.tab){ renderTab(b.dataset.tab); return; }
+  const act = b.dataset.act;
+
+  if(act === 'save'){ doSave(); return; }
+  if(act === 'export'){ doExport(); return; }
+  if(act === 'import'){ document.getElementById('importFile').click(); return; }
+  if(act === 'download'){ doDownload(); return; }
+  if(act === 'reset'){ doReset(); return; }
+  if(act === 'logout'){ doLogout(); return; }
+  if(act === 'change-pass'){ doChangePass(); return; }
+  if(act === 'change-photo'){ document.getElementById('photoFile').click(); return; }
+  if(act === 'remove-photo'){ delete CONTENT.hero.avatar; markDirty(); renderTab(currentTab); flash('Photo removed'); return; }
+  if(act === 'refresh-preview'){
+    const f = document.getElementById('previewFrame');
+    if(f) f.src = f.src;
+    flash('Preview refreshed');
+    return;
+  }
+  if(act === 'toggle-mobile'){
+    previewMobile = !previewMobile;
+    const f = document.getElementById('previewFrame');
+    const btn = document.getElementById('mobileToggleBtn');
+    if(f){
+      if(previewMobile){ f.style.width = '390px'; f.style.maxWidth = '100%'; if(btn) btn.textContent = '🖥 Desktop view'; }
+      else { f.style.width = '100%'; if(btn) btn.textContent = '📱 Mobile view'; }
+    }
+    return;
+  }
+
+  if(act === 'move'){
+    const arr = getPath(CONTENT, b.dataset.arr) || [];
+    const i = parseInt(b.dataset.i,10), dir = parseInt(b.dataset.dir,10);
+    const j = i + dir;
+    if(j >= 0 && j < arr.length){
+      const tmp = arr[i]; arr[i] = arr[j]; arr[j] = tmp;
+      markDirty(); renderTab(currentTab);
+    }
+    return;
+  }
+  if(act === 'add-img'){
+    lastImgIndex = parseInt(b.dataset.i,10);
+    document.getElementById('projImagesFile').click();
+    return;
+  }
+  if(act === 'del-img'){
+    const it = CONTENT.projects.items[parseInt(b.dataset.i,10)];
+    if(it && it.images) it.images.splice(parseInt(b.dataset.j,10),1);
+    markDirty(); renderTab(currentTab);
+    return;
+  }
+
+  /* ---- custom sections ("Add Anything") ---- */
+  const cs = CONTENT.custom && CONTENT.custom.sections ? CONTENT.custom.sections : (CONTENT.custom = { sections: [] }, CONTENT.custom.sections);
+  const si = parseInt(b.dataset.si,10), bi = parseInt(b.dataset.bi,10);
+
+  if(act === 'add-section'){
+    cs.push({ eyebrow:'', title:'New Section', sub:'', visible:true, blocks:[] });
+    markDirty(); renderTab(currentTab); return;
+  }
+  if(act === 'del-section'){ cs.splice(si,1); markDirty(); renderTab(currentTab); return; }
+  if(act === 'move-section'){
+    const j = si + parseInt(b.dataset.dir,10);
+    if(j >= 0 && j < cs.length){ const tmp = cs[si]; cs[si] = cs[j]; cs[j] = tmp; markDirty(); renderTab(currentTab); }
+    return;
+  }
+  if(act === 'add-block'){
+    const sec = cs[si]; if(!sec) return;
+    sec.blocks = sec.blocks || [];
+    sec.blocks.push(defaultBlock(b.dataset.type));
+    markDirty(); renderTab(currentTab); return;
+  }
+  if(act === 'del-block'){ const sec = cs[si]; if(sec && sec.blocks) sec.blocks.splice(bi,1); markDirty(); renderTab(currentTab); return; }
+  if(act === 'move-block'){
+    const sec = cs[si]; if(!sec || !sec.blocks) return;
+    const j = bi + parseInt(b.dataset.dir,10);
+    if(j >= 0 && j < sec.blocks.length){ const tmp = sec.blocks[bi]; sec.blocks[bi] = sec.blocks[j]; sec.blocks[j] = tmp; markDirty(); renderTab(currentTab); }
+    return;
+  }
+  if(act === 'add-card'){
+    const blk = cs[si] && cs[si].blocks ? cs[si].blocks[bi] : null;
+    if(blk){ blk.items = blk.items || []; blk.items.push({icon:'gear', title:'New card', text:''}); markDirty(); renderTab(currentTab); }
+    return;
+  }
+  if(act === 'del-card'){
+    const blk = cs[si] && cs[si].blocks ? cs[si].blocks[bi] : null;
+    if(blk && blk.items) blk.items.splice(parseInt(b.dataset.ci,10),1);
+    markDirty(); renderTab(currentTab); return;
+  }
+  if(act === 'add-chip-block'){
+    const blk = cs[si] && cs[si].blocks ? cs[si].blocks[bi] : null;
+    if(blk){ blk.items = blk.items || []; blk.items.push('New tag'); markDirty(); renderTab(currentTab); }
+    return;
+  }
+  if(act === 'del-chip-block'){
+    const blk = cs[si] && cs[si].blocks ? cs[si].blocks[bi] : null;
+    if(blk && blk.items) blk.items.splice(parseInt(b.dataset.ci,10),1);
+    markDirty(); renderTab(currentTab); return;
+  }
+  if(act === 'upload-block-image'){
+    lastBlockImage = { si:si, bi:bi };
+    document.getElementById('blockImageFile').click();
+    return;
+  }
+  if(act === 'remove-block-image'){
+    const blk = cs[si] && cs[si].blocks ? cs[si].blocks[bi] : null;
+    if(blk){ blk.src = ''; markDirty(); renderTab(currentTab); }
+    return;
+  }
+
+  if(act === 'add-item'){
+    const arr = getPath(CONTENT, b.dataset.arr) || [];
+    arr.push(defaultItemFor(b.dataset.arr)); markDirty(); renderTab(currentTab); return;
+  }
+  if(act === 'del-item'){
+    const arr = getPath(CONTENT, b.dataset.arr) || [];
+    arr.splice(parseInt(b.dataset.i,10),1); markDirty(); renderTab(currentTab); return;
+  }
+  if(act === 'add-stat'){ CONTENT.hero.stats.push({value:'0',decimals:0,label:'New stat'}); markDirty(); renderTab(currentTab); return; }
+  if(act === 'del-stat'){ CONTENT.hero.stats.splice(parseInt(b.dataset.i,10),1); markDirty(); renderTab(currentTab); return; }
+  if(act === 'add-tag'){ CONTENT.hero.tags = CONTENT.hero.tags || []; CONTENT.hero.tags.push('New tag'); markDirty(); renderTab(currentTab); return; }
+  if(act === 'del-tag'){ if(CONTENT.hero.tags) CONTENT.hero.tags.splice(parseInt(b.dataset.i,10),1); markDirty(); renderTab(currentTab); return; }
+  if(act === 'add-bullet'){
+    const arr = getPath(CONTENT, b.dataset.arr) || [];
+    const it = arr[parseInt(b.dataset.i,10)];
+    if(it){ it.bullets = it.bullets || []; it.bullets.push('New point'); }
+    markDirty(); renderTab(currentTab); return;
+  }
+  if(act === 'del-bullet'){
+    const arr = getPath(CONTENT, b.dataset.arr) || [];
+    const it = arr[parseInt(b.dataset.i,10)];
+    if(it && it.bullets) it.bullets.splice(parseInt(b.dataset.b,10),1);
+    markDirty(); renderTab(currentTab); return;
+  }
+  if(act === 'add-chip'){
+    const g = CONTENT.skills.groups[parseInt(b.dataset.g,10)];
+    if(g){ g.chips.push('New Skill'); markDirty(); renderTab(currentTab); }
+    return;
+  }
+  if(act === 'del-chip'){
+    const g = CONTENT.skills.groups[parseInt(b.dataset.g,10)];
+    if(g){ g.chips.splice(parseInt(b.dataset.i,10),1); markDirty(); renderTab(currentTab); }
+    return;
+  }
+});
+
+/* =====================================================================
+   ACTIONS
+===================================================================== */
+function doSave(){
+  storeSet(STORE_KEY, JSON.stringify(CONTENT));
+  markSaved();
+  flash('Saved ✓ — portfolio updated');
+}
+function doExport(){
+  const blob = new Blob([JSON.stringify(CONTENT, null, 2)], {type:'application/json'});
+  triggerDownload(blob, 'portfolio-content.json');
+  flash('Exported ✓');
+}
+function doImport(){ document.getElementById('importFile').click(); }
+function doReset(){
+  if(!confirm('Reset ALL content to the default version?')) return;
+  storeDel(STORE_KEY);
+  CONTENT = deepClone(DEFAULT_CONTENT);
+  markSaved();
+  renderTab(currentTab);
+  flash('Reset to default');
+}
+function doLogout(){
+  if(dirty && !confirm('You have unsaved changes. Logout anyway?')) return;
+  sessDel(AUTH_KEY);
+  location.reload();
+}
+function doChangePass(){
+  const v = document.getElementById('newPass').value.trim();
+  if(v.length < 4){ flash('Password must be at least 4 characters','err'); return; }
+  storeSet(PASS_KEY, v);
+  document.getElementById('newPass').value = '';
+  flash('Password updated ✓');
+}
+function getPass(){ return storeGet(PASS_KEY) || DEFAULT_PASS; }
+
+function triggerDownload(blob, name){
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); }, 500);
+}
+
+/* bake content into a fresh index.html */
+function injectContent(html){
+  const baked = JSON.stringify(CONTENT).replace(/</g,'\\u003c');
+  const marker = 'window.__BAKED_CONTENT__ = null;';
+  if(html.indexOf(marker) === -1){ throw new Error('marker-not-found'); }
+  return html.replace(marker, 'window.__BAKED_CONTENT__ = '+baked+';');
+}
+
+function doDownload(){
+  flash('Building site…');
+  fetch('index.html')
+    .then(r => { if(!r.ok) throw new Error('http'); return r.text(); })
+    .then(html => {
+      const out = injectContent(html);
+      triggerDownload(new Blob([out], {type:'text/html'}), 'index.html');
+      flash('index.html downloaded ✓');
+    })
+    .catch(()=>{
+      flash('Failed to fetch index.html — open dashboard from the site URL','err');
+      alert('Could not fetch index.html.\n\nMake sure you open the dashboard from the live site URL (e.g. https://…/dashboard.html), not as a local file.\n\nAlternative: use "Export JSON" and bake the file manually.');
+    });
+}
+
+/* =====================================================================
+   LOGIN
+===================================================================== */
+function tryLogin(){
+  const v = document.getElementById('passInput').value;
+  if(v === getPass()){
+    sessSet(AUTH_KEY, '1');
+    showApp();
+  } else {
+    document.getElementById('gateErr').textContent = 'Wrong password';
+  }
+}
+function showApp(){
+  document.getElementById('gate').style.display = 'none';
+  document.getElementById('app').classList.add('on');
+  renderTab('hero');
+  markSaved();
+}
+document.getElementById('loginBtn').addEventListener('click', tryLogin);
+document.getElementById('passInput').addEventListener('keydown', e=>{ if(e.key === 'Enter') tryLogin(); });
+
+/* file inputs */
+document.getElementById('importFile').addEventListener('change', function(e){
+  const f = e.target.files[0]; if(!f) return;
+  const r = new FileReader();
+  r.onload = function(){
+    try{
+      CONTENT = deepMerge(deepClone(DEFAULT_CONTENT), JSON.parse(r.result));
+      markDirty(); renderTab(currentTab); flash('Imported ✓ — click Save');
+    }catch(err){ flash('Invalid JSON file','err'); }
+  };
+  r.readAsText(f);
+  e.target.value = '';
+});
+document.getElementById('photoFile').addEventListener('change', function(e){
+  const f = e.target.files[0]; if(!f) return;
+  const r = new FileReader();
+  r.onload = function(){
+    const img = new Image();
+    img.onload = function(){
+      const max = 720;
+      const scale = Math.min(1, max / Math.max(img.width, img.height));
+      const cv = document.createElement('canvas');
+      cv.width = Math.round(img.width*scale); cv.height = Math.round(img.height*scale);
+      cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
+      CONTENT.hero.avatar = cv.toDataURL('image/jpeg', 0.85);
+      markDirty(); renderTab(currentTab); flash('Photo uploaded ✓ — click Save');
+    };
+    img.src = r.result;
+  };
+  r.readAsDataURL(f);
+  e.target.value = '';
+});
+
+/* custom block image upload */
+let lastBlockImage = null;
+document.getElementById('blockImageFile').addEventListener('change', function(e){
+  const f = e.target.files[0]; if(!f || !lastBlockImage) return;
+  const r = new FileReader();
+  r.onload = function(){
+    const img = new Image();
+    img.onload = function(){
+      const max = 900;
+      const scale = Math.min(1, max / Math.max(img.width, img.height));
+      const cv = document.createElement('canvas');
+      cv.width = Math.round(img.width*scale); cv.height = Math.round(img.height*scale);
+      cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
+      const cs = CONTENT.custom.sections;
+      const blk = cs[lastBlockImage.si] && cs[lastBlockImage.si].blocks ? cs[lastBlockImage.si].blocks[lastBlockImage.bi] : null;
+      if(blk){ blk.src = cv.toDataURL('image/jpeg', 0.8); markDirty(); renderTab(currentTab); flash('Image added ✓'); }
+    };
+    img.src = r.result;
+  };
+  r.readAsDataURL(f);
+  e.target.value = '';
+});
+
+/* mobile preview state */
+let previewMobile = false;
+
+/* project images upload */
+let lastImgIndex = 0;
+document.getElementById('projImagesFile').addEventListener('change', function(e){
+  const files = Array.from(e.target.files || []);
+  if(!files.length) return;
+  const pr = CONTENT.projects.items[lastImgIndex];
+  if(!pr){ return; }
+  pr.images = pr.images || [];
+  let done = 0;
+  files.forEach(f=>{
+    const r = new FileReader();
+    r.onload = function(){
+      const img = new Image();
+      img.onload = function(){
+        const max = 900;
+        const scale = Math.min(1, max / Math.max(img.width, img.height));
+        const cv = document.createElement('canvas');
+        cv.width = Math.round(img.width*scale); cv.height = Math.round(img.height*scale);
+        cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
+        pr.images.push(cv.toDataURL('image/jpeg', 0.8));
+        done++;
+        if(done === files.length){ markDirty(); renderTab(currentTab); flash(files.length+' photo(s) added ✓'); }
+      };
+      img.src = r.result;
+    };
+    r.readAsDataURL(f);
+  });
+  e.target.value = '';
+});
+
+/* section visibility checkboxes */
+document.getElementById('main').addEventListener('change', function(e){
+  const t = e.target;
+  if(t.dataset.section){
+    CONTENT.settings.sections[t.dataset.section] = t.checked;
+    markDirty();
+  }
+});
+
+/* toast */
+let toastTimer = null;
+function flash(msg, cls){
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'toast show' + (cls ? ' '+cls : '');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(()=> el.className = 'toast', 2500);
+}
+
+/* boot */
+if(sessGet(AUTH_KEY) === '1'){ showApp(); }
+else { document.getElementById('app').classList.remove('on'); }
+</script>
+</body>
+</html>

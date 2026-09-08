@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://menamedhat.github.io/sitemap.xml
