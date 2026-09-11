@@ -1,9 +1,8 @@
 /* Service Worker — offline cache for the portfolio (PWA) */
-const CACHE = 'mm-portfolio-v1';
+const CACHE = 'mm-portfolio-v2';
 const ASSETS = [
   './',
   'index.html',
-  'dashboard.html',
   'manifest.json',
   'icon-192.png',
   'icon-512.png',

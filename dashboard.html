@@ -89,6 +89,8 @@
   .img-thumb button{position:absolute;top:2px;right:2px;width:18px;height:18px;border-radius:50%;border:none;background:rgba(244,63,94,.85);color:#fff;font-size:11px;line-height:1;cursor:pointer}
   .switch-row{display:flex;align-items:center;gap:8px;background:rgba(56,189,248,.06);border:1px solid var(--line2);border-radius:9px;padding:9px 12px;font-size:13px;font-weight:600;color:var(--text);cursor:pointer}
   .switch-row input{accent-color:var(--cyan);width:16px;height:16px}
+  .att-row{display:inline-flex;align-items:center;gap:6px;background:rgba(56,189,248,.08);border:1px solid var(--line2);border-radius:999px;padding:4px 6px 4px 12px}
+  .att-name{font-size:12px;color:var(--text);max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .toolbar{position:sticky;bottom:0;z-index:20;display:flex;gap:8px;flex-wrap:wrap;align-items:center;justify-content:center;padding:12px;background:rgba(5,7,13,.9);backdrop-filter:blur(10px);border-top:1px solid var(--line)}
   .toast{position:fixed;top:70px;left:50%;transform:translateX(-50%) translateY(-12px);z-index:200;padding:11px 20px;border-radius:11px;background:rgba(8,13,24,.97);border:1px solid var(--line2);color:var(--green);font-family:var(--mono);font-size:13px;opacity:0;pointer-events:none;transition:.25s}
   .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
@@ -160,6 +162,7 @@
   <input type="file" id="photoFile" accept="image/*" hidden>
   <input type="file" id="projImagesFile" accept="image/*" multiple hidden>
   <input type="file" id="blockImageFile" accept="image/*" hidden>
+  <input type="file" id="attFile" multiple hidden>
 </div>
 
 <div class="toast" id="toast"></div>
@@ -186,6 +189,11 @@ function deepMerge(base, over){
 }
 function esc(s){ return String(s == null ? "" : s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
 function getPath(obj, path){ return path.split(".").reduce((o,k)=> (o && o[k] !== undefined) ? o[k] : undefined, obj); }
+function getOrCreateArr(path){
+  let arr = getPath(CONTENT, path);
+  if(!Array.isArray(arr)){ arr = []; setPath(CONTENT, path, arr); }
+  return arr;
+}
 function setPath(obj, path, val){
   const ks = path.split("."); let o = obj;
   for(let i=0;i<ks.length-1;i++){ if(o[ks[i]] === undefined) o[ks[i]] = {}; o = o[ks[i]]; }
@@ -253,10 +261,10 @@ const DEFAULT_CONTENT = {
     items: [
       { title: "Fire Fighting Car", year: "2026", tag: "Hardware", role: "Role: Electrical Wiring & Connections", visual: "fire",
         bullets: ["Designed and executed the full electrical wiring and connection layout for a fire-fighting vehicle model.","Ensured reliable power distribution and safe integration between motors, actuators, and control modules.","Practiced real circuit-level troubleshooting and cable routing discipline."],
-        github: "https://github.com/mena24242", demo: "#", code: "", images: [] },
+        github: "https://github.com/mena24242", demo: "", code: "", images: [], fields: [] },
       { title: "Bus Management System", year: "2026", tag: "Automation", role: "Role: Automation & Workflow Developer", visual: "bus",
         bullets: ["Developed an automated bus-management workflow that streamlines routing and scheduling logic.","Reduced manual coordination overhead by automating repetitive operational steps.","Explored workflow automation tools (n8n) and data flow design."],
-        github: "https://github.com/mena24242", demo: "#", code: "", images: [] }
+        github: "https://github.com/mena24242", demo: "", code: "", images: [], fields: [] }
     ]
   },
   certifications: {
@@ -361,6 +369,38 @@ function field(label, path, opts){
   return '<div class="f"><label>'+esc(label)+'</label>'+inp+(opts.hint?'<small>'+esc(opts.hint)+'</small>':'')+'</div>';
 }
 
+function attachmentsEditor(path){
+  const arr = getPath(CONTENT, path) || [];
+  const rows = arr.map(function(a, ai){
+    const label = (a && a.name) ? a.name : ((a && a.url) ? a.url : ('File '+(ai+1)));
+    return '<span class="att-row"><span class="att-name">'+(a && a.url ? '🔗 ' : '📎 ')+esc(label)+'</span>'+
+      '<button class="mini danger" data-act="del-att" data-path="'+path+'" data-i="'+ai+'">×</button></span>';
+  }).join('');
+  return '<label style="display:block;font-size:12px;color:var(--muted);margin:8px 0 6px;font-weight:600">Attachments (video / PDF / Excel / any file)</label>'+
+    '<div class="chip-row" style="margin-bottom:8px">'+(rows || '<span style="font-size:12px;color:var(--muted)">No attachments yet.</span>')+'</div>'+
+    '<div style="display:flex;gap:6px;flex-wrap:wrap">'+
+      '<button class="mini" data-act="add-file" data-path="'+path+'">📎 Add file</button>'+
+      '<button class="mini" data-act="add-link-att" data-path="'+path+'">🔗 Add link (video/url)</button>'+
+    '</div>';
+}
+
+function customButtonsEditor(path){
+  const arr = getPath(CONTENT, path) || [];
+  const rows = arr.map(function(f, fi){
+    return '<div class="item" style="padding:10px;margin-bottom:8px">'+
+      '<div class="it-head"><b>Button '+(fi+1)+'</b>'+
+        '<button class="mini danger" data-act="del-field" data-path="'+path+'" data-i="'+fi+'">×</button></div>'+
+      '<div class="row">'+
+        field('Button name (label)', path+'.'+fi+'.label', {placeholder:'e.g. Datasheet'})+
+        field('Link or text', path+'.'+fi+'.value', {placeholder:'https://… or plain text'})+
+      '</div>'+
+    '</div>';
+  }).join('');
+  return '<label style="display:block;font-size:12px;color:var(--muted);margin:8px 0 6px;font-weight:600">Custom buttons (any name + link/text)</label>'+
+    (rows || '<span style="font-size:12px;color:var(--muted)">No custom buttons yet.</span>')+
+    '<div style="margin-top:8px"><button class="mini" data-act="add-field" data-path="'+path+'">+ Add button</button></div>';
+}
+
 function bulletsEditor(arrKey, i){
   const arr = getPath(CONTENT, arrKey) || [];
   const b = arr[i] ? (arr[i].bullets||[]) : [];
@@ -453,6 +493,7 @@ function timelineTab(key, title, desc){
       '<div class="row">'+field('Period (when)',''+key+'.items.'+i+'.when')+field('Grade badge (optional)',''+key+'.items.'+i+'.grade')+'</div>'+
       '<label style="display:block;font-size:12px;color:var(--muted);margin:8px 0 6px;font-weight:600">Bullet points</label>'+
       bulletsEditor(key+'.items', i)+
+      attachmentsEditor(key+'.items.'+i+'.attachments')+
     '</div>'
   )).join('');
   return '<h2>'+esc(title)+'</h2><div class="desc">'+esc(desc)+'</div>'+
@@ -492,7 +533,7 @@ function renderProjects(){
       '<div class="row">'+field('Title','projects.items.'+i+'.title')+field('Year','projects.items.'+i+'.year')+'</div>'+
       '<div class="row">'+field('Tag (category)','projects.items.'+i+'.tag')+field('Role','projects.items.'+i+'.role')+'</div>'+
       field('Visual','projects.items.'+i+'.visual',{type:'select',options:VISUAL_OPTS,hint:'Only "fire" has an embedded photo gallery.'})+
-      '<div class="row">'+field('Source link (GitHub)','projects.items.'+i+'.github')+field('Demo link','projects.items.'+i+'.demo')+'</div>'+
+      '<div class="row">'+field('Source link (GitHub)','projects.items.'+i+'.github')+field('Demo (link or text)','projects.items.'+i+'.demo',{hint:'Accept anything: video URL (YouTube/PDF/site), or plain text note.'})+'</div>'+
       '<label style="display:block;font-size:12px;color:var(--muted);margin:8px 0 6px;font-weight:600">Gallery photos</label>'+
       '<div class="chip-row" style="margin-bottom:8px">'+
         (pr.images||[]).map((img,ji)=> '<span class="img-thumb"><img src="'+img+'" alt=""><button data-act="del-img" data-i="'+i+'" data-j="'+ji+'">×</button></span>').join('')+
@@ -502,6 +543,8 @@ function renderProjects(){
       '<label style="display:block;font-size:12px;color:var(--muted);margin:8px 0 6px;font-weight:600">Bullet points</label>'+
       bulletsEditor('projects.items', i)+
       field('Project code (Arduino / C++ / Python…)','projects.items.'+i+'.code',{type:'textarea',rows:4,hint:'Shows a "Code" button on the project card when filled.'})+
+      attachmentsEditor('projects.items.'+i+'.attachments')+
+      customButtonsEditor('projects.items.'+i+'.fields')+
     '</div>'
   )).join('');
   return '<h2>Projects</h2><div class="desc">Your project showcase. Each project can have bullets, links and code.</div>'+
@@ -519,6 +562,7 @@ function renderCerts(){
       '<div class="row">'+field('Code (CSWA…)','certifications.certs.'+i+'.code')+field('Issuer','certifications.certs.'+i+'.issuer')+'</div>'+
       field('Description','certifications.certs.'+i+'.desc',{type:'textarea',rows:2})+
       field('Verification link (optional)','certifications.certs.'+i+'.link',{hint:'Shows a "Verify credential" link on the card when filled (e.g. Dassault virtualtester URL).'})+
+      attachmentsEditor('certifications.certs.'+i+'.attachments')+
     '</div>'
   )).join('');
   return '<h2>Certifications</h2><div class="desc">Certifications and awards shown as cards.</div>'+
@@ -569,6 +613,7 @@ function renderServices(){
     '<div class="item">'+itemHeader('Service '+(i+1),'del-item','services.items',i)+
       '<div class="row">'+field('Icon','services.items.'+i+'.icon',{type:'select',options:ICON_OPTS})+field('Title','services.items.'+i+'.title')+'</div>'+
       field('Text','services.items.'+i+'.body',{type:'textarea',rows:2})+
+      attachmentsEditor('services.items.'+i+'.attachments')+
     '</div>'
   )).join('');
   return '<h2>Services</h2><div class="desc">What you offer, shown as a 3-column grid.</div>'+
@@ -586,6 +631,7 @@ function renderTestimonials(){
       field('Name','testimonials.items.'+i+'.name')+
       field('Role / Organization','testimonials.items.'+i+'.role')+
       field('Text','testimonials.items.'+i+'.text',{type:'textarea',rows:3})+
+      attachmentsEditor('testimonials.items.'+i+'.attachments')+
     '</div>'
   )).join('');
   return '<h2>Testimonials</h2><div class="desc">Recommendations from mentors and teammates. This section is hidden by default — enable it in Settings once you fill real content.</div>'+
@@ -617,7 +663,8 @@ function blockEditor(si, bi, b){
   let body = '';
   if(b.type === 'paragraph'){
     body = field('Title (optional)','custom.sections.'+si+'.blocks.'+bi+'.title')+
-           field('Text','custom.sections.'+si+'.blocks.'+bi+'.text',{type:'textarea',rows:3});
+           field('Text','custom.sections.'+si+'.blocks.'+bi+'.text',{type:'textarea',rows:3})+
+           attachmentsEditor('custom.sections.'+si+'.blocks.'+bi+'.attachments');
   } else if(b.type === 'cards'){
     body = '<label style="display:block;font-size:12px;color:var(--muted);margin:8px 0 6px;font-weight:600">Cards</label>'+
       (b.items||[]).map((c,ci)=>(
@@ -629,6 +676,7 @@ function blockEditor(si, bi, b){
             field('Title','custom.sections.'+si+'.blocks.'+bi+'.items.'+ci+'.title')+
           '</div>'+
           field('Text','custom.sections.'+si+'.blocks.'+bi+'.items.'+ci+'.text',{type:'textarea',rows:2})+
+          attachmentsEditor('custom.sections.'+si+'.blocks.'+bi+'.items.'+ci+'.attachments')+
         '</div>'
       )).join('')+
       '<button class="mini" data-act="add-card" data-si="'+si+'" data-bi="'+bi+'">+ Add card</button>';
@@ -776,7 +824,7 @@ function markSaved(){
 }
 
 function defaultItemFor(arrKey){
-  if(arrKey === 'projects.items') return { title:'New Project', year:'2026', tag:'Category', role:'Role: your role', visual:'generic', bullets:['Short description of the project.'], github:'#', demo:'#', code:'' };
+  if(arrKey === 'projects.items') return { title:'New Project', year:'2026', tag:'Category', role:'Role: your role', visual:'generic', bullets:['Short description of the project.'], github:'#', demo:'', code:'', fields:[] };
   if(arrKey === 'certifications.certs') return { code:'CODE', issuer:'Issuer', desc:'Short description.' };
   if(arrKey === 'about.cards') return { icon:'gear', title:'New Card', body:'Short description.' };
   if(arrKey === 'skills.groups') return { icon:'code', title:'New Group', chips:['New Skill'] };
@@ -834,6 +882,40 @@ document.addEventListener('click', function(e){
   if(act === 'del-img'){
     const it = CONTENT.projects.items[parseInt(b.dataset.i,10)];
     if(it && it.images) it.images.splice(parseInt(b.dataset.j,10),1);
+    markDirty(); renderTab(currentTab);
+    return;
+  }
+
+  /* ---- attachments ---- */
+  if(act === 'add-file'){
+    lastAttPath = b.dataset.path;
+    document.getElementById('attFile').click();
+    return;
+  }
+  if(act === 'add-link-att'){
+    const u = prompt('Enter the link/URL (YouTube video, Google Drive, any file URL…):');
+    if(!u || !u.trim()) return;
+    const arr = getOrCreateArr(b.dataset.path);
+    arr.push({ name: (u.split('/').pop().split('?')[0] || 'Link'), url: u.trim() });
+    markDirty(); renderTab(currentTab);
+    flash('Link attached ✓');
+    return;
+  }
+  if(act === 'del-att'){
+    const arr = getOrCreateArr(b.dataset.path);
+    arr.splice(parseInt(b.dataset.i,10),1);
+    markDirty(); renderTab(currentTab);
+    return;
+  }
+  if(act === 'add-field'){
+    const arr = getOrCreateArr(b.dataset.path);
+    arr.push({ label:'New button', value:'' });
+    markDirty(); renderTab(currentTab);
+    return;
+  }
+  if(act === 'del-field'){
+    const arr = getOrCreateArr(b.dataset.path);
+    arr.splice(parseInt(b.dataset.i,10),1);
     markDirty(); renderTab(currentTab);
     return;
   }
@@ -1110,6 +1192,29 @@ function pingServer(){
     .then(function(){ serverConnected = true; updateServerStatus(); })
     .catch(function(){ serverConnected = false; updateServerStatus(); });
 }
+
+/* attachments upload */
+let lastAttPath = null;
+document.getElementById('attFile').addEventListener('change', function(e){
+  const files = Array.from(e.target.files || []);
+  e.target.value = '';
+  if(!files.length || !lastAttPath) return;
+  const MAX = 4 * 1024 * 1024; // 4MB
+  files.forEach(function(f){ if(f.size > MAX){ alert('"'+f.name+'" is larger than 4MB — add it as a link instead (big videos/PDFs).'); } });
+  const valid = files.filter(function(f){ return f.size <= MAX; });
+  if(!valid.length) return;
+  const arr = getOrCreateArr(lastAttPath);
+  let done = 0;
+  valid.forEach(function(f){
+    const r = new FileReader();
+    r.onload = function(){
+      arr.push({ name: f.name, data: r.result });
+      done++;
+      if(done === valid.length){ markDirty(); renderTab(currentTab); flash(done + ' file(s) attached ✓'); }
+    };
+    r.readAsDataURL(f);
+  });
+});
 
 /* project images upload */
 let lastImgIndex = 0;
