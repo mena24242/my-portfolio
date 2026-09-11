@@ -27,7 +27,6 @@ def bake(data):
     """Write the content into index.html in place of the marker line."""
     with open(INDEX_FILE, "r", encoding="utf-8") as f:
         html = f.read()
-    # escape '<' so the JSON can never break out of the <script> tag
     baked = json.dumps(data, ensure_ascii=False).replace("<", "\\u003c")
     new_line = "window.__BAKED_CONTENT__ = " + baked + ";"
     if BAKE_RE.search(html):
@@ -43,7 +42,6 @@ class Handler(SimpleHTTPRequestHandler):
         super().__init__(*args, directory=DIR, **kwargs)
 
     def end_headers(self):
-        # avoid stale browser cache after edits
         self.send_header("Cache-Control", "no-store")
         super().end_headers()
 
