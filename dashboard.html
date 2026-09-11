@@ -286,8 +286,7 @@ const DEFAULT_CONTENT = {
     linkedinUrl: "https://www.linkedin.com/in/mena-medhat-b38093370",
     github: "github.com/mena24242",
     githubUrl: "https://github.com/mena24242",
-    location: "Sohag, Egypt",
-    formspree: ""
+    location: "Sohag, Egypt"
   },
   footer: {
     line1: "© 2026 Mena Medhat · Mechatronics Engineering · Sohag, Egypt",
@@ -597,7 +596,7 @@ function renderContact(){
         field('GitHub URL','contact.githubUrl')+
       '</div>'+
       field('Location','contact.location')+
-      field('Formspree form ID (for real messages)','contact.formspree',{hint:'Get a free form ID from formspree.io — leave empty to use the email (mailto) fallback.'})+
+      '<p style="color:var(--muted);font-size:12px;margin-top:4px">Contact form messages are sent through Web3Forms and delivered directly to the configured inbox.</p>'+
     '</div>';
 }
 
