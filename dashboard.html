@@ -172,7 +172,7 @@ const EMPTY_CONTENT = {
   testimonials:{eyebrow:'Testimonials',title:'What People Say',sub:'',items:[]},
   contact:{eyebrow:'Contact',title:"Let's Build Something",sub:'',email:'',phone:'',phoneDisplay:'',linkedin:'',linkedinUrl:'',github:'',githubUrl:'',location:''},
   footer:{line1:'',line2:''},
-  settings:{accent:'cyan',sections:{about:true,education:true,experience:true,services:true,skills:true,projects:true,certifications:true,testimonials:false,contact:true}},
+  settings:{accent:'cyan',gtagId:'',metaPixelId:'',web3formsKey:'60002f5f-73bc-4bcb-aef9-9dbddf2ebec8',cvUrl:'Mena-Medhat-CV.pdf',cvLabel:'Download CV',sections:{about:true,education:true,experience:true,services:true,skills:true,projects:true,certifications:true,testimonials:false,contact:true}},
   custom:{sections:[]}
 };
 function deepClone(x){ return JSON.parse(JSON.stringify(x)); }
@@ -502,8 +502,11 @@ R.custom = function(){
 R.settings = function(){
   const sec = CONTENT.settings.sections || {};
   const keys = ['about','education','experience','services','skills','projects','certifications','testimonials','contact'];
-  return '<h2>Settings</h2><div class="desc">Appearance, visibility, password & backups.</div>'+
+  return '<h2>Settings</h2><div class="desc">Appearance, visibility,Tracking, CV & password.</div>'+
     '<div class="card"><h3>Appearance<span class="line"></span></h3>'+field('Accent color','settings.accent',{type:'select',options:ACCENT_OPTS})+'</div>'+
+    '<div class="card"><h3>📊 Tracking (optional)<span class="line"></span></h3>'+field('Google tag — G-XXXXXXX','settings.gtagId',{ph:'G-XXXXXXX',hint:'Paste your GA4 Measurement ID. Leave empty to disable. Can also be set in supabase-config.js via GTAG_ID.'})+field('Meta Pixel ID','settings.metaPixelId',{ph:'123456789012345',hint:'Facebook Pixel ID. Leave empty to disable. Also settable via META_PIXEL_ID.'})+'</div>'+
+    '<div class="card"><h3>✉️ Contact form<span class="line"></span></h3>'+field('Web3Forms Access Key','settings.web3formsKey',{ph:'60002f5f-...',hint:'From https://web3forms.com — the inbox that receives portfolio messages. Also settable via WEB3FORMS_ACCESS_KEY.'})+'</div>'+
+    '<div class="card"><h3>📄 CV button<span class="line"></span></h3>'+field('CV URL / file path','settings.cvUrl',{ph:'Mena-Medhat-CV.pdf or https://…',hint:'File in repo or full URL (Drive/Dropbox). Leave empty to hide?' })+field('CV button label','settings.cvLabel',{ph:'Download CV'})+'</div>'+
     '<div class="card"><h3>Section visibility<span class="line"></span></h3>'+keys.map(k=>'<label class="switch-row"><input type="checkbox" data-bool="settings.sections.'+k+'"'+(sec[k]!==false?' checked':'')+'><span>'+k.charAt(0).toUpperCase()+k.slice(1)+'</span></label>').join('')+'</div>'+
     '<div class="card"><h3>Change password<span class="line"></span></h3><div class="row"><div class="f"><label>New password (min 4 chars)</label><input id="newPass" type="text"></div><div class="f"><label>Repeat</label><input id="newPass2" type="text"></div></div><button class="mini" data-act="change-pass">Change password</button><div class="hint">Stored hashed in Supabase (table portfolio_auth).</div></div>'+
     '<div class="card"><h3>Data<span class="line"></span></h3>'+
