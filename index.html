@@ -415,6 +415,15 @@ body.mouse-on .mouse-glow{opacity:1}
   .float-tag.t3{right:-6%}
   .float-tag.t5{left:-6%}
 }
+@media(max-width:1250px){
+  .nav-links a{padding:8px 8px;font-size:13px}
+  .nav-cta{padding:8px 12px;font-size:13px;margin-left:2px}
+  .lang-toggle,.theme-toggle{width:34px;height:34px}
+}
+@media(max-width:1100px){
+  .nav-links{display:none}
+  .burger{display:block}
+}
 @media(max-width:640px){
   .nav-links{display:none}
   .burger{display:block}
@@ -530,6 +539,7 @@ body.mouse-on .mouse-glow{opacity:1}
       <a href="#about" data-nav="about">About</a>
       <a href="#education" data-nav="education">Education</a>
       <a href="#experience" data-nav="experience">Experience</a>
+      <a href="#services" data-nav="services">Services</a>
       <a href="#skills" data-nav="skills">Skills</a>
       <a href="#projects" data-nav="projects">Projects</a>
       <a href="#certifications" data-nav="certifications">Certifications</a>
@@ -549,6 +559,7 @@ body.mouse-on .mouse-glow{opacity:1}
     <a href="#about" data-nav="about">About</a>
     <a href="#education" data-nav="education">Education</a>
     <a href="#experience" data-nav="experience">Experience</a>
+    <a href="#services" data-nav="services">Services</a>
     <a href="#skills" data-nav="skills">Skills</a>
     <a href="#projects" data-nav="projects">Projects</a>
     <a href="#certifications" data-nav="certifications">Certifications</a>
@@ -938,21 +949,198 @@ const AR = {
   "Sending…":"جارٍ الإرسال…",
   "Message sent! I'll get back to you soon. ✓":"تم إرسال الرسالة! سأرد عليك قريبًا. ✓",
   "Something went wrong — email me directly.":"حدث خطأ — راسلني مباشرة على الإيميل.",
-  "Copy link":"نسخ الرابط"
+  "Copy link":"نسخ الرابط",
+  /* --- newer content (baked / dashboard edits) --- */
+  "I design PCB & 3D models":"أصمم لوحات PCB ونماذج ثلاثية الأبعاد",
+  "I build AI automation workflows":"أبني أنظمة أتمتة بالذكاء الاصطناعي",
+  "Classic Control":"التحكم الكلاسيكي",
+  "PLC & HMI":"PLC & HMI",
+  "PCB":"PCB",
+  "CAD":"CAD",
+  " FEA":"FEA",
+  "Software and Program language ":"البرمجيات ولغات البرمجة",
+  "Sohag, Egypt":"سوهاج، مصر",
+  "Photo":"صورة",
+  "Project":"مشروع",
+  "Link":"رابط",
+  "Code copied ✓":"تم نسخ الكود ✓",
+  "Copy failed":"فشل النسخ"
 };
 
 let LANG = 'en';
-function t(s){
-  if(LANG !== 'ar') return s;
-  return (s != null && AR[s] !== undefined) ? AR[s] : s;
+
+/* reverse dictionary (Arabic -> English) for content typed in Arabic via the dashboard */
+const REV_AR = {};
+for(const _ark in AR){ if(REV_AR[AR[_ark]] === undefined) REV_AR[AR[_ark]] = _ark; }
+
+/* =====================================================================
+   AUTOMATIC TRANSLATION — works on old AND newly-added content.
+   Old curated strings use the AR dictionary above (instant & accurate).
+   Anything missing from it — new services, projects, custom "Add Anything"
+   sections, or text the owner typed in Arabic — is auto-translated with a
+   free machine-translation API, then cached forever in localStorage.
+===================================================================== */
+const MT_CACHE_KEY = 'mm_mt_cache_v1';
+const MT_OFF_KEY   = 'mm_mt_off_until';
+const MT_ENDPOINT  = 'https://api.mymemory.translated.net/get';
+let MT_CACHE = {};
+try{ MT_CACHE = JSON.parse(localStorage.getItem(MT_CACHE_KEY) || '{}') || {}; }catch(e){ MT_CACHE = {}; }
+let MT_PENDING = {}, mtFlushTimer = null, mtWorking = false, mtChanged = false;
+
+function hasArabic(s){ return /[\u0600-\u06FF]/.test(String(s)); }
+function hasLatin(s){ return /[A-Za-z]/.test(String(s)); }
+function byteLen(s){ try{ return new TextEncoder().encode(s).length; }catch(e){ return unescape(encodeURIComponent(s)).length; } }
+
+/* things we should NOT send to a translator: numbers, urls, emails, domains, acronyms */
+function shouldTranslate(s){
+  const str = String(s == null ? '' : s).trim();
+  if(str.length < 3) return false;
+  if(!/[A-Za-z\u0600-\u06FF]/.test(str)) return false;                    /* numbers / dates only */
+  if(/^(https?:|mailto:|tel:|data:|www\.)/i.test(str)) return false;      /* links */
+  if(/^\S+@\S+\.\S+$/.test(str)) return false;                            /* emails */
+  if(!/\s/.test(str) && (str.indexOf('.') !== -1 || str.indexOf('/') !== -1)) return false; /* domains & handles */
+  if(hasLatin(str) && !/[a-z]/.test(str) && /[A-Z]{2}/.test(str)) return false;             /* acronyms: PCB, FEA, C++, SOLIDWORKS */
+  return true;
 }
+
+function mtOffline(){ try{ return +(localStorage.getItem(MT_OFF_KEY) || 0) > Date.now(); }catch(e){ return false; } }
+function mtGoOffline(ms){ try{ localStorage.setItem(MT_OFF_KEY, String(Date.now() + ms)); }catch(e){} }
+function saveMTCache(){
+  try{
+    const keys = Object.keys(MT_CACHE);
+    if(keys.length > 1500) keys.slice(0, keys.length - 1500).forEach(k => delete MT_CACHE[k]);
+    localStorage.setItem(MT_CACHE_KEY, JSON.stringify(MT_CACHE));
+  }catch(e){}
+}
+
+function queueTranslate(s, dir){
+  const key = dir + '::' + s;
+  if(MT_PENDING[key] || MT_CACHE[key] !== undefined || mtOffline()) return;
+  MT_PENDING[key] = { s: s, dir: dir };
+  if(mtFlushTimer) clearTimeout(mtFlushTimer);
+  mtFlushTimer = setTimeout(flushTranslations, 250);
+}
+
+/* split long text into small chunks (API limit) at sentence boundaries */
+function chunkText(s, maxBytes){
+  s = String(s);
+  if(byteLen(s) <= maxBytes) return [s];
+  const sentences = s.match(/[^.!?;:\n،؛]+[.!?;:\n،؛]*/g) || [s];
+  const out = []; let cur = '';
+  sentences.forEach(p => {
+    if(cur && byteLen(cur + p) > maxBytes){ out.push(cur); cur = p; }
+    else cur += p;
+  });
+  if(cur) out.push(cur);
+  const final = [];
+  out.forEach(c => {
+    while(byteLen(c) > maxBytes){
+      let cut = Math.floor(c.length / 2), head = c.slice(0, cut);
+      while(cut > 1 && byteLen(head) > maxBytes){ cut = Math.floor(cut / 2); head = c.slice(0, cut); }
+      final.push(head); c = c.slice(cut);
+    }
+    if(c) final.push(c);
+  });
+  return final;
+}
+
+function decodeEntities(str){
+  const ta = document.createElement('textarea');
+  ta.innerHTML = str;
+  return ta.value;
+}
+
+function mtFetchChunk(text, dir){
+  const url = MT_ENDPOINT + '?q=' + encodeURIComponent(text) + '&langpair=' + encodeURIComponent(dir);
+  return fetch(url).then(r => {
+    if(!r.ok) throw new Error('http ' + r.status);
+    return r.json();
+  }).then(d => {
+    const out = d && d.responseData && d.responseData.translatedText;
+    if(d && d.responseStatus && +d.responseStatus !== 200) throw new Error('mt ' + d.responseStatus);
+    if(!out || /MYMEMORY WARNING|QUERY LENGTH LIMIT|INVALID LANGUAGE/i.test(String(out))) throw new Error('mt quota');
+    return decodeEntities(String(out));
+  });
+}
+
+/* drain the queue politely (throttled) and re-render progressively as translations land */
+function flushTranslations(){
+  if(mtWorking) return;
+  const keys = Object.keys(MT_PENDING);
+  if(!keys.length) return;
+  mtWorking = true; mtChanged = false;
+  let i = 0, lastRender = 0;
+  function maybeRender(force){
+    if(!mtChanged) return;
+    const now = Date.now();
+    if(force || now - lastRender > 1200){ lastRender = now; mtChanged = false; saveMTCache(); renderAll(); }
+  }
+  function done(){
+    mtWorking = false;
+    saveMTCache();
+    maybeRender(true);
+  }
+  function next(){
+    if(i >= keys.length){ done(); return; }
+    if(mtOffline()){ MT_PENDING = {}; done(); return; }
+    const key = keys[i++];
+    const item = MT_PENDING[key];
+    delete MT_PENDING[key];
+    const parts = chunkText(item.s, 240);
+    const outs = []; let ci = 0;
+    function nextChunk(){
+      if(ci >= parts.length){
+        const joined = outs.join(' ').replace(/\s{2,}/g, ' ').trim();
+        MT_CACHE[key] = (joined && joined.toLowerCase() !== item.s.trim().toLowerCase()) ? joined : item.s;
+        if(MT_CACHE[key] !== item.s) mtChanged = true;
+        maybeRender(false);
+        setTimeout(next, 150);
+        return;
+      }
+      mtFetchChunk(parts[ci], item.dir).then(txt => {
+        outs.push(txt); ci++; setTimeout(nextChunk, 150);
+      }).catch(() => {
+        mtGoOffline(30 * 60 * 1000);   /* quota / network problem: pause auto-translation for 30 min */
+        MT_PENDING = {};
+        done();
+      });
+    }
+    nextChunk();
+  }
+  next();
+}
+
+function t(s){
+  if(s == null) return s;
+  s = String(s);
+  if(LANG === 'ar'){
+    if(AR[s] !== undefined) return AR[s];        /* curated dictionary — old content */
+    if(!hasLatin(s)) return s;                   /* already Arabic / numbers */
+    const key = 'en|ar::' + s;
+    if(MT_CACHE[key] !== undefined) return MT_CACHE[key];
+    if(shouldTranslate(s)) queueTranslate(s, 'en|ar');   /* new content -> auto-translate */
+    return s;
+  }
+  /* English view: anything typed in Arabic via the dashboard gets translated back */
+  if(!hasArabic(s)) return s;
+  if(REV_AR[s] !== undefined) return REV_AR[s];  /* reverse dictionary */
+  const key = 'ar|en::' + s;
+  if(MT_CACHE[key] !== undefined) return MT_CACHE[key];
+  if(shouldTranslate(s)) queueTranslate(s, 'ar|en');
+  return s;
+}
+
 function initLang(){
   try{ LANG = localStorage.getItem(LANG_KEY) === 'ar' ? 'ar' : 'en'; }catch(e){ LANG = 'en'; }
+}
+function updateLangUI(){
+  document.querySelectorAll('.lang-toggle').forEach(b => { b.textContent = LANG === 'en' ? 'ع' : 'EN'; });
+  document.documentElement.setAttribute('lang', LANG === 'ar' ? 'ar' : 'en');
 }
 function setLang(l){
   LANG = l;
   try{ localStorage.setItem(LANG_KEY, l); }catch(e){}
-  document.getElementById('langToggle').textContent = LANG === 'en' ? 'ع' : 'EN';
+  updateLangUI();
   applyNavLabels();
   renderAll();
 }
@@ -1106,7 +1294,7 @@ function projectButtonsHTML(pr, i){
   }
   (pr.fields || []).forEach(function(f, fi){
     if(f && f.label && String(f.value || '').trim()){
-      out += '<button class="btn btn-ghost field-open" data-index="'+i+'" data-fi="'+fi+'" style="padding:10px 18px;font-size:13.5px">'+esc(f.label)+'</button>';
+      out += '<button class="btn btn-ghost field-open" data-index="'+i+'" data-fi="'+fi+'" style="padding:10px 18px;font-size:13.5px">'+esc(t(f.label))+'</button>';
     }
   });
   return out;
@@ -1317,7 +1505,7 @@ function renderContact(){
   const item = (icon, href, lbl, valText, extraCls) => (
     '<a class="contact-item" href="'+href+'" '+(href.indexOf('http')===0?'target="_blank" rel="noopener"':'')+'>'+
       '<span class="ci-ico'+(extraCls?' '+extraCls:'')+'">'+icon+'</span>'+
-      '<span><span class="ci-lbl">'+esc(t(lbl))+'</span><br><span class="ci-val'+(extraCls?' '+extraCls+'-val':'')+'">'+esc(valText)+'</span></span>'+
+      '<span><span class="ci-lbl">'+esc(t(lbl))+'</span><br><span class="ci-val'+(extraCls?' '+extraCls+'-val':'')+'">'+esc(t(valText))+'</span></span>'+
     '</a>'
   );
   const mailIco = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 6L2 7"/></svg>';
@@ -1373,19 +1561,19 @@ function renderBlock(blk){
   switch(blk.type){
     case 'paragraph':
       return '<div class="block">'+
-        (blk.title ? '<h3 class="block-title">'+esc(blk.title)+'</h3>' : '')+
-        (blk.text ? '<p class="block-text">'+esc(blk.text)+'</p>' : '')+
+        (blk.title ? '<h3 class="block-title">'+esc(t(blk.title))+'</h3>' : '')+
+        (blk.text ? '<p class="block-text">'+esc(t(blk.text))+'</p>' : '')+
         attachmentsHTML(blk.attachments)+
       '</div>';
     case 'cards':
       return '<div class="grid-3" style="margin-top:0">'+(blk.items||[]).map(c=>
         '<div class="card reveal"><div class="ico">'+(ICONS[c.icon]||ICONS.gear)+'</div>'+
-        '<h3>'+esc(c.title)+'</h3><p>'+esc(c.text)+'</p>'+attachmentsHTML(c.attachments)+'</div>').join('')+'</div>';
+        '<h3>'+esc(t(c.title))+'</h3><p>'+esc(t(c.text))+'</p>'+attachmentsHTML(c.attachments)+'</div>').join('')+'</div>';
     case 'chips':
       return '<div class="block"><div class="chips" style="margin-top:0">'+
-        (blk.items||[]).map(c=>'<span class="chip">'+esc(c)+'</span>').join('')+'</div></div>';
+        (blk.items||[]).map(c=>'<span class="chip">'+esc(t(c))+'</span>').join('')+'</div></div>';
     case 'link':
-      return '<div class="block"><a class="btn btn-primary" href="'+esc(blk.url||'#')+'" target="_blank" rel="noopener">'+esc(blk.title||'Link')+'</a></div>';
+      return '<div class="block"><a class="btn btn-primary" href="'+esc(blk.url||'#')+'" target="_blank" rel="noopener">'+esc(t(blk.title||'Link'))+'</a></div>';
     case 'image':
       return blk.src ? '<div class="block"><img class="block-image" src="'+esc(blk.src)+'" alt="'+esc(blk.title||'')+'" loading="lazy"></div>' : '';
     default:
@@ -1405,9 +1593,9 @@ function renderCustom(){
     sec.className = 'custom-section';
     sec.id = 'custom-' + si;
     sec.innerHTML = '<div class="container">'+
-      (s.eyebrow ? '<div class="eyebrow">'+esc(s.eyebrow)+'</div>' : '')+
-      (s.title ? '<h2 class="section-title">'+esc(s.title)+'</h2>' : '')+
-      (s.sub ? '<p class="section-sub">'+esc(s.sub)+'</p>' : '')+
+      (s.eyebrow ? '<div class="eyebrow">'+esc(t(s.eyebrow))+'</div>' : '')+
+      (s.title ? '<h2 class="section-title">'+esc(t(s.title))+'</h2>' : '')+
+      (s.sub ? '<p class="section-sub">'+esc(t(s.sub))+'</p>' : '')+
       '<div class="block-wrap">'+blocks+'</div>'+
     '</div>';
     host.appendChild(sec);
@@ -1421,7 +1609,7 @@ function populateCustomNav(){
     if(!el) return;
     el.innerHTML = cs.map((s,si)=>{
       if(s.visible === false) return '';
-      return '<a href="#custom-'+si+'">'+esc(s.title||s.eyebrow||('Section '+(si+1)))+'</a>';
+      return '<a href="#custom-'+si+'">'+esc(t(s.title||s.eyebrow||('Section '+(si+1))))+'</a>';
     }).join('');
   });
 }
@@ -1432,6 +1620,7 @@ function renderNav(){
 }
 
 function renderAll(){
+  const pre = document.querySelector('.pre-text'); if(pre) pre.textContent = t('Loading portfolio…');
   renderNav(); renderHero();
   setSection('about', sectionVisible('about')); if(sectionVisible('about')) renderAbout();
   setSection('education', sectionVisible('education')); if(sectionVisible('education')) renderTimeline('educationContent','education');
@@ -1683,11 +1872,11 @@ function shareNow(type, el){
   if(type === 'copy'){
     const copyText = location.href;
     if(navigator.clipboard && navigator.clipboard.writeText){
-      navigator.clipboard.writeText(copyText).then(function(){ flash(t('Copy link')+' ✓'); }, function(){ flash('Copy failed'); });
+      navigator.clipboard.writeText(copyText).then(function(){ flash(t('Copy link')+' ✓'); }, function(){ flash(t('Copy failed')); });
     } else {
       const ta = document.createElement('textarea');
       ta.value = copyText; document.body.appendChild(ta); ta.select();
-      try{ document.execCommand('copy'); flash(t('Copy link')+' ✓'); }catch(err){ flash('Copy failed'); }
+      try{ document.execCommand('copy'); flash(t('Copy link')+' ✓'); }catch(err){ flash(t('Copy failed')); }
       document.body.removeChild(ta);
     }
   } else if(type === 'whatsapp'){
@@ -1727,7 +1916,7 @@ function lbRender(){
   document.getElementById('lbPrev').style.display = multiple ? 'grid' : 'none';
   document.getElementById('lbNext').style.display = multiple ? 'grid' : 'none';
   document.getElementById('lbCount').textContent = multiple ? ((lbState.idx+1)+' / '+lbState.imgs.length) : '';
-  document.getElementById('lbCaption').textContent = (lbState.title||'Project') + (multiple ? (' — Photo '+(lbState.idx+1)) : '');
+  document.getElementById('lbCaption').textContent = t(lbState.title||'Project') + (multiple ? (' — '+t('Photo')+' '+(lbState.idx+1)) : '');
   const thumbs = document.getElementById('lbThumbs');
   if(multiple){
     thumbs.style.display = 'flex';
@@ -1771,13 +1960,13 @@ function flash(msg){
   flash._t = setTimeout(()=> el.classList.remove('show'), 2200);
 }
 document.getElementById('codeCopy').addEventListener('click', function(){
-  const t = document.getElementById('codePre').textContent;
+  const codeTxt = document.getElementById('codePre').textContent;
   if(navigator.clipboard && navigator.clipboard.writeText){
-    navigator.clipboard.writeText(t).then(()=> flash('Code copied ✓')).catch(()=> flash('Copy failed'));
+    navigator.clipboard.writeText(codeTxt).then(()=> flash(t('Code copied ✓'))).catch(()=> flash(t('Copy failed')));
   } else {
     const ta = document.createElement('textarea');
-    ta.value = t; document.body.appendChild(ta); ta.select();
-    try{ document.execCommand('copy'); flash('Code copied ✓'); }catch(e){ flash('Copy failed'); }
+    ta.value = codeTxt; document.body.appendChild(ta); ta.select();
+    try{ document.execCommand('copy'); flash(t('Code copied ✓')); }catch(e){ flash(t('Copy failed')); }
     document.body.removeChild(ta);
   }
 });
@@ -1876,7 +2065,7 @@ function applyAccent(a){
 initLang();
 initTheme();
 applyAccent(CONTENT.settings && CONTENT.settings.accent ? CONTENT.settings.accent : 'cyan');
-document.getElementById('langToggle').textContent = LANG === 'en' ? 'ع' : 'EN';
+updateLangUI();
 renderAll();
 </script>
 <script>
