@@ -1,5 +1,5 @@
 /* Service Worker — offline cache for the portfolio (PWA) */
-const CACHE = 'mm-portfolio-v2';
+const CACHE = 'mm-portfolio-v3';
 const ASSETS = [
   './',
   'index.html',
@@ -30,6 +30,7 @@ self.addEventListener('activate', function(e){
 
 self.addEventListener('fetch', function(e){
   if(e.request.method !== 'GET') return;
+  if(e.request.url.indexOf('supabase.co') !== -1 || e.request.url.indexOf('dashboard.html') !== -1) return;
   e.respondWith(
     caches.match(e.request).then(function(cached){
       var fetched = fetch(e.request).then(function(res){
