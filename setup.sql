@@ -23,7 +23,7 @@ on conflict (id) do nothing;
 
 -- default password: mena2026  (change it from the dashboard → Settings)
 insert into public.portfolio_auth (id, password_hash)
-values ('main', extensions.crypt('mena2026', extensions.gen_salt('bf')))
+values ('main', extensions.crypt('242006', extensions.gen_salt('bf')))
 on conflict (id) do nothing;
 
 -- 3) Security: everyone can READ the content, nobody can write directly
