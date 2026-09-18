@@ -714,7 +714,7 @@ R.settings = function(){
       '<div class="row">'+field('Google Analytics 4 ID','settings.gtagId',{ph:'G-XXXXXXXXXX'})+field('Meta Pixel ID','settings.metaPixelId',{ph:'123456789012345'})+'</div>'+
       field('Web3Forms access key','settings.web3formsKey',{ph:'60002f5f-…',hint:'مفتاح فورم التواصل — الرسايل بتوصلك على الإيميل وتتخزن في Supabase'})+
       '<div class="hint">سيبها فاضية لو مش مستخدمها. القيم دي بتترجّع تلقائيًا على <code>index.html</code> بعد الـ Save.</div></div>'+
-    '<div class="card"><h3>Section visibility<span class="line"></span></h3>'+keys.map(k=>'<label class="switch-row"><input type="checkbox" data-bool="settings.sections.'+k+'"'+(sec[k]!==false?' checked':'')+'><span>'+k.charAt(0).toUpperCase()+k.slice(1)+'</span></label>').join('')+'</div>'+
+    '<div class="card"><h3>Section visibility<span class="line"></span></h3>'+secRows+'</div>'+
     '<div class="card"><h3>Change password<span class="line"></span></h3><div class="row"><div class="f"><label>New password (min 4 chars)</label><input id="newPass" type="text"></div><div class="f"><label>Repeat</label><input id="newPass2" type="text"></div></div><button class="mini" data-act="change-pass">Change password</button><div class="hint">Stored hashed in Supabase (table portfolio_auth).</div></div>'+
     '<div class="card"><h3>Data<span class="line"></span></h3>'+
       '<p style="color:var(--muted);font-size:13px;margin-bottom:12px">Current content size: <b>'+fmtSize(contentSize())+'</b>'+(contentSize() > 4*1048576 ? ' — ⚠️ large; consider fewer/lighter images' : '')+'. Last saved: '+(lastSaved ? new Date(lastSaved).toLocaleString() : '—')+'</p>'+
@@ -742,7 +742,7 @@ const ANALYTICS_SNIPPET = [
   "    body: JSON.stringify({ event: event, meta: meta || {}, visitor_id: VID, path: location.pathname })",
   "  }).catch(function(){});",
   "}",
-  "mmTrack('view');                                            // once per page load",
+  "mmTrack('view', { source: 'instagram' });  // real visits only — index.html dedupes refreshes & skips preview",
   "mmTrack('project_view',  { project: 'Fire Fighting Car' }); // project card click",
   "mmTrack('cv_download',   { location: 'nav_desktop' });      // CV button",
   "mmTrack('github_click',  { url: 'https://github.com/…' });  // GitHub button",
@@ -752,32 +752,100 @@ const ANALYTICS_SNIPPET = [
 ].join('\n');
 
 R.analytics = function(){
-  return '<h2>Analytics</h2><div class="desc">Views, clicks & visitors — reported by the live site, stored in Supabase.</div>'+
+  return '<h2>Analytics</h2><div class="desc">Visits, unique visitors, clicks & where people came from — reported by the live site, stored in Supabase.</div>'+
     '<div class="chip-row" style="margin-bottom:14px"><button class="mini" data-act="analytics-refresh">↻ Refresh</button></div>'+
     '<div class="card" id="analyticsBody"><p style="color:var(--muted)">Loading analytics…</p></div>'+
     '<div class="card"><h3>Site wiring<span class="line"></span></h3>'+
-    '<p style="color:var(--muted);font-size:13px">Paste this once into your live site and it starts reporting here automatically:</p>'+
+    '<p style="color:var(--muted);font-size:13px">index.html already reports everything automatically (visits are deduped: one visit per 30 minutes, and the dashboard preview is never counted). This snippet is only for building another page on the same database:</p>'+
     '<pre class="snip">'+esc(ANALYTICS_SNIPPET)+'</pre></div>';
 };
+
+/* fallback: read raw events straight from Supabase so this tab NEVER shows empty */
+async function fetchEventsRaw(days){
+  const since = new Date(Date.now() - days * 864e5).toISOString();
+  const r = await fetch(SB_URL + '/rest/v1/portfolio_events?select=event,visitor_id,meta,path,created_at&created_at=gte.' + encodeURIComponent(since) + '&order=created_at.desc&limit=5000', { headers: sbHeaders(), cache: 'no-store' });
+  if(!r.ok) throw new Error('HTTP ' + r.status);
+  return r.json();
+}
+async function fetchMessagesCount(){
+  try{
+    const r = await fetch(SB_URL + '/rest/v1/portfolio_messages?select=id', { headers: sbHeaders({ 'Prefer': 'count=exact' }), cache: 'no-store' });
+    const cr = r.headers.get('content-range');
+    if(cr){ const m = cr.match(/\/(\d+)/); if(m) return parseInt(m[1], 10); }
+  }catch(e){}
+  return null;
+}
+/* compute the same shape as get_analytics() from raw rows */
+function analyticsFromRows(rows, days){
+  const t = { view:0, unique_visitors:0, project_view:0, cv_download:0, github_click:0, linkedin_click:0, contact_submit:0 };
+  const visitors = new Set(), perDay = {}, proj = {}, src = {};
+  for(let i = 0; i <= days; i++){ perDay[new Date(Date.now() - (days - i) * 864e5).toISOString().slice(0,10)] = { v: new Set(), n: 0 }; } /* inclusive ends = 31 rows, same as SQL */
+  /* full, recognizable place names - identical mapping to pb_event_source() in SQL */
+  const canon = s => {
+    s = String(s || '').toLowerCase().trim().replace(/^www\./, '');
+    if(!s || s === '(direct)' || s === 'none') return 'direct';
+    if(s === 'ig' || s === 'insta' || s.includes('instagram')) return 'instagram';
+    if(s === 'fb' || s.includes('facebook') || s.includes('fb.me')) return 'facebook';
+    if(s === 'in' || s.includes('linkedin') || s.includes('lnkd.in')) return 'linkedin';
+    if(s === 'x' || s === 'x.com' || s === 't.co' || s.includes('twitter')) return 'twitter';
+    if(s === 'wa' || s.includes('whatsapp')) return 'whatsapp';
+    if(s === 'tg' || s.includes('t.me') || s.includes('telegram')) return 'telegram';
+    if(s === 'yt' || s === 'youtu.be' || s.includes('youtube')) return 'youtube';
+    if(s.includes('tiktok')) return 'tiktok';
+    if(s.includes('reddit') || s === 'redd.it') return 'reddit';
+    if(s.includes('github')) return 'github';
+    if(s.includes('gmail') || s === 'email' || s === 'newsletter' || s === 'mail') return 'email';
+    return s;
+  };
+  const srcOf = e => canon((e.meta && e.meta.source) || ((e.path || '').match(/utm_source=([^&]+)/) || [])[1] || (/fbclid=/.test(e.path || '') ? 'facebook' : 'direct'));
+  (rows || []).forEach(e => {
+    const k = String(e.created_at || '').slice(0, 10);
+    if(!(k in perDay)) return;
+    perDay[k].n++;
+    if(e.visitor_id) perDay[k].v.add(e.visitor_id);
+    if(e.event === 'view'){
+      t.view++; visitors.add(e.visitor_id || 'anon');
+      const s = String(srcOf(e) || 'direct'); src[s] = (src[s] || 0) + 1;
+    }
+    else if(e.event === 'project_view'){ t.project_view++; const p = (e.meta && (e.meta.project || e.meta.title)) || 'unknown'; proj[p] = (proj[p] || 0) + 1; }
+    else if(e.event === 'cv_download' || e.event === 'download_cv') t.cv_download++;
+    else if(e.event === 'github_click') t.github_click++;
+    else if(e.event === 'linkedin_click') t.linkedin_click++;
+    else if(e.event === 'contact_submit' || e.event === 'generate_lead') t.contact_submit++;
+  });
+  t.unique_visitors = visitors.size;
+  const daily = Object.keys(perDay).sort().map(d => ({ date: d, visitors: perDay[d].v.size, events: perDay[d].n }));
+  let top = null; for(const p in proj){ if(!top || proj[p] > top.views) top = { id: p, views: proj[p] }; }
+  const sources = Object.keys(src).map(s => ({ source: s, visits: src[s] })).sort((a, b) => b.visits - a.visits).slice(0, 6);
+  return { days: days, totals: t, daily: daily, top_project: top, sources: sources };
+}
 
 async function loadAnalytics(){
   const box = document.getElementById('analyticsBody'); if(!box) return;
   box.innerHTML = '<p style="color:var(--muted)">Loading…</p>';
-  let d;
+  let d, mode = 'rpc';
   try{ d = await sbRpc('get_analytics', { p_days: 30 }); }
   catch(e){
-    box.innerHTML = '<div class="banner">⚠️ ' + esc(e.message) + '<br>Run the <b>“ADDITION (v2) — Analytics + Messages”</b> section of <code>setup.sql</code> in Supabase → SQL Editor, then press Refresh.</div>';
-    return;
+    try{ d = analyticsFromRows(await fetchEventsRaw(30), 30); mode = 'raw'; }
+    catch(e2){
+      box.innerHTML = '<div class="banner">⚠️ ' + esc(e.message) + '<br>Could not read raw events either: ' + esc(e2.message) +
+        '<br>Run the new <code>setup.sql</code> in Supabase → SQL Editor, then press Refresh.</div>';
+      return;
+    }
   }
   const t = d.totals || {};
-  /* keys match the event_type values the site sends (see setup.sql) */
   const cards = [
-    ['👀 Portfolio views', t.view],
-    ['🚀 Project views', t.project_view],
+    ['👀 Visits', t.view],
+    ['🧑 Unique visitors', t.unique_visitors],
+    ['🚀 Project opens', t.project_view],
     ['📄 CV downloads', t.cv_download],
     ['🐙 GitHub clicks', t.github_click],
-    ['💼 LinkedIn clicks', t.linkedin_click]
+    ['💼 LinkedIn clicks', t.linkedin_click],
+    ['📝 Form submits', t.contact_submit]
   ];
+  const msgCount = (d.messages !== undefined && d.messages !== null) ? d.messages : await fetchMessagesCount();
+  if(msgCount !== null) cards.push(['📨 Messages', msgCount]);
+
   const daily = d.daily || [];
   const top = d.top_project;
   const maxV = Math.max(1, daily.reduce((m,x)=> Math.max(m, x.visitors||0), 0));
@@ -788,17 +856,35 @@ async function loadAnalytics(){
       '<span class="chart-lbl">'+(i % 5 === 0 || i === daily.length-1 ? String(x.date).slice(5) : '')+'</span></div>';
   }).join('');
   const totVis = daily.reduce((s,x)=> s+(x.visitors||0),0), totEv = daily.reduce((s,x)=> s+(x.events||0),0);
+
+  /* traffic sources */
+  const srcs = d.sources || [];
+  const maxSrc = Math.max(1, ...srcs.map(s => s.visits || 0));
+  const srcHtml = srcs.length ? srcs.map(s =>
+    '<div style="display:flex;align-items:center;gap:10px;margin:7px 0">'+
+      '<span style="width:120px;font-size:12.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+esc(s.source)+'">'+esc(s.source)+'</span>'+
+      '<span style="flex:1;height:8px;border-radius:4px;background:var(--panel2);overflow:hidden;display:block"><span style="display:block;height:100%;width:'+Math.round(100*(s.visits||0)/maxSrc)+'%;background:linear-gradient(90deg,var(--acc),transparent)"></span></span>'+
+      '<b style="min-width:28px;text-align:right">'+(s.visits||0)+'</b>'+
+    '</div>').join('')
+    : '<p style="color:var(--muted);font-size:13px">No sources recorded yet — new visits are tagged automatically (instagram / facebook / direct…).</p>';
+
+  const emptyAll = totEv === 0 && !srcs.length;
   box.innerHTML =
-    '<div class="row3" style="margin-bottom:14px">'+cards.map(c=>'<div class="stat"><span class="l">'+c[0]+'</span><span class="n">'+(c[1]||0)+'</span></div>').join('')+'</div>'+
+    (mode === 'raw' ? '<div class="banner" style="margin-bottom:12px">ℹ️ Computed from raw events (the <code>get_analytics</code> RPC is unavailable — run the new <code>setup.sql</code> to enable server-side stats &amp; the messages count here).</div>' : '')+
+    (emptyAll
+      ? '<p style="color:var(--muted);font-size:13.5px;padding:18px 0">No visits recorded in the last 30 days.<br>Open your <b>live site</b> (this dashboard preview is not counted) and press ↻ Refresh.</p>'
+      :
+    '<div class="row3" style="margin-bottom:14px">'+cards.map(c=>'<div class="stat"><span class="l">'+c[0]+'</span><span class="n">'+(c[1]===undefined||c[1]===null?'—':c[1])+'</span></div>').join('')+'</div>'+
+    '<div class="card" style="margin-bottom:14px"><h3>Where visitors came from<span class="line"></span></h3>'+srcHtml+'</div>'+
     '<div style="background:var(--panel2);border:1px solid var(--line);border-radius:14px;padding:14px 16px;margin-bottom:14px;font-size:13.5px">'+
-      '🏆 <b>Most viewed project:</b> ' + (top ? esc(top.id) + ' <span style="color:var(--muted);font-size:12.5px">(' + top.views + ' views)</span>' : '<span style="color:var(--muted)">no project views yet</span>') +
+      '🏆 <b>Most opened project:</b> ' + (top ? esc(top.id) + ' <span style="color:var(--muted);font-size:12.5px">(' + top.views + ' opens)</span>' : '<span style="color:var(--muted)">no project opens yet — click a project card on your site to test it</span>') +
     '</div>'+
     '<div class="row3" style="margin-bottom:18px">'+
       '<div class="stat"><span class="l">Visitors (last ' + (d.days||30) + ' days)</span><span class="n">' + totVis + '</span></div>'+
       '<div class="stat"><span class="l">Total events (last ' + (d.days||30) + ' days)</span><span class="n">' + totEv + '</span></div>'+
     '</div>'+
     '<h3 style="font-size:14px;text-transform:uppercase;letter-spacing:.08em;color:var(--acc);margin-bottom:4px">Visitors over time <span style="color:var(--muted);font-size:11.5px;text-transform:none;letter-spacing:0">(last ' + (d.days||30) + ' days, per day)</span></h3>'+
-    (daily.length && totVis > 0 ? '<div class="chart">' + bars + '</div>' : '<p style="color:var(--muted);font-size:13px;padding:14px 0">No visits recorded yet — once the snippet above is on your live site, the chart fills in daily.</p>');
+    (daily.length && totVis > 0 ? '<div class="chart">' + bars + '</div>' : '<p style="color:var(--muted);font-size:13px;padding:14px 0">No visits with a known visitor yet — the chart fills in as people (or you, on the live site) visit.</p>'));
 }
 
 /* ---- ✉️ Messages / Contact ---- */
