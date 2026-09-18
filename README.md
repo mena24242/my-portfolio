@@ -40,10 +40,10 @@
    - **📎 مرفقات لأي عنصر**: ارفع ملفات (PDF/Excel/صور) أو ضيف لينكات (فيديو YouTube/Drive) على المشاريع والشهادات والخبرات والخدمات والآراء والأقسام المخصصة
    - إظهار / إخفاء أي قسم
    - ➕ **Add Anything**: أقسام مخصصة بأي محتوى
-   - 🎨 اختيار لون الموقع
+   - 🎨 **Portfolio Control**: التحكم الكامل في شكل الموقع من مكان واحد — Theme (غامق/فاتح/تلقائي) + Colors (5 ألوان جاهزة أو لون مخصص) + Fonts (Inter/Poppins/Montserrat/Cairo…) + Animations (كاملة/خفيفة/بدون) + Layout (عرض الصفحة والمسافات) + Navbar (شكل وتثبيت) + Footer (إظهار وشكل) + Background (شبكة/نقاط/Aurora/سادة + جزيئات وتوهج) + Cards (شكل/حواف/Hover) + Buttons (شكل/حواف)
    - 👁️ معاينة حية + 📱 معاينة موبايل
    - 📄 **CV**: ارفع ملف PDF/Word من تبويب Hero (بيظهر في زراير الناف بار + زرار في الهيرو) أو حط لينك خارجي من Settings
-   - ⚙️ **Settings**: لون الموقع + إظهار الأقسام + لينك/اسم زرار الـ CV + Web3Forms + Google Analytics + Meta Pixel
+   - ⚙️ **Settings**: إظهار الأقسام + لينك/اسم زرار الـ CV + Web3Forms + Google Analytics + Meta Pixel (شكل الموقع اتقل لتبويب 🎨 Portfolio Control)
    - 📦 **Download updated index.html**: ينزّل نسخة من `index.html` بالمحتوى الجديد جوه — ارفعها على أي استضافة ثابتة
    - 📊 Analytics (مشاهدات/نقرات) + ✉️ Messages (رسايل الفورم)
 

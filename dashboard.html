@@ -87,6 +87,12 @@ main h2{font-size:22px;margin-bottom:6px}
 .banner{background:rgba(251,191,36,.1);border:1px solid rgba(251,191,36,.35);color:var(--warn);padding:12px 14px;border-radius:12px;font-size:13px;margin-bottom:18px}
 code{font-family:var(--mono);background:rgba(148,163,184,.12);padding:2px 6px;border-radius:6px;font-size:12px}
 kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);padding:1px 5px;border-radius:5px;color:var(--muted)}
+input[type=color]{padding:4px;height:42px;cursor:pointer}
+.swatches{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+.swatch{width:36px;height:36px;border-radius:10px;border:2px solid transparent;cursor:pointer;transition:.15s;padding:0}
+.swatch:hover{transform:translateY(-2px)}
+.swatch.active{border-color:var(--text);transform:scale(1.1)}
+.swatch .tick{color:#fff;font-size:13px;font-weight:800;text-shadow:0 1px 3px rgba(0,0,0,.6);line-height:32px}
 /* analytics + messages */
 .stat{background:var(--panel2);border:1px solid var(--line);border-radius:14px;padding:14px 16px}
 .stat .l{font-size:12px;color:var(--muted)}
@@ -194,6 +200,7 @@ const EMPTY_CONTENT = {
   contact:{eyebrow:'Contact',title:"Let's Build Something",sub:'',email:'',phone:'',phoneDisplay:'',linkedin:'',linkedinUrl:'',github:'',githubUrl:'',location:''},
   footer:{line1:'',line2:''},
   settings:{accent:'cyan',gtagId:'',metaPixelId:'',web3formsKey:'',cvUrl:'',cvLabel:'',sections:{about:true,education:true,experience:true,services:true,skills:true,projects:true,certifications:true,testimonials:false,contact:true}},
+  design:{theme:'auto',colors:{accent:'cyan',custom:'#22d3ee'},font:'system',animations:'full',layout:{width:'normal',spacing:'normal'},navbar:{style:'glass',sticky:true},background:{style:'grid',particles:true,glow:true},cards:{style:'glass',radius:'md',hover:true},buttons:{style:'gradient',radius:'rounded'},footer:{visible:true,style:'default'}},
   custom:{sections:[]}
 };
 function deepClone(x){ return JSON.parse(JSON.stringify(x)); }
@@ -260,6 +267,8 @@ async function loadFromDb(){
   const remote = row.content || {};
   lastSaved = row.updated_at;
   CONTENT = deepMerge(deepClone(EMPTY_CONTENT), remote);
+  /* legacy: rows saved before Portfolio Control keep their old accent choice */
+  if(!remote.design && remote.settings && remote.settings.accent && CONTENT.design) CONTENT.design.colors.accent = remote.settings.accent;
   CONTENT.__empty = !Object.keys(remote).length;
   markClean();
 }
@@ -375,6 +384,7 @@ async function importFromSite(){
     const av = html.match(/const AVATAR = "(data:[^"]+)"/);
     CONTENT = deepMerge(deepClone(EMPTY_CONTENT), baked);
     if(av && !CONTENT.hero.avatar) CONTENT.hero.avatar = av[1];
+    if(!baked.design && baked.settings && baked.settings.accent && CONTENT.design) CONTENT.design.colors.accent = baked.settings.accent;
     CONTENT.__empty = false; markDirty(); renderTab(currentTab);
     flash('Imported from index.html ✓ — now click Save to Supabase');
   }catch(e){ flash('Import failed: ' + e.message, 'err'); }
@@ -426,10 +436,15 @@ function field(label, path, o){
   o = o || {}; const v = getPath(CONTENT, path);
   let inp;
   if(o.type === 'textarea') inp = '<textarea data-path="'+path+'"'+(o.code ? ' class="code"' : '')+' placeholder="'+esc(o.ph||'')+'">'+esc(v)+'</textarea>';
-  else if(o.type === 'select') inp = '<select data-path="'+path+'">'+o.options.map(x=>'<option value="'+x+'"'+(x===v?' selected':'')+'>'+x+'</option>').join('')+'</select>';
+  else if(o.type === 'select') inp = '<select data-path="'+path+'">'+o.options.map(x=>{
+      const val = typeof x === 'string' ? x : x.v, lab = typeof x === 'string' ? x : x.l;
+      return '<option value="'+esc(val)+'"'+(String(val)===String(v)?' selected':'')+'>'+esc(lab)+'</option>';
+    }).join('')+'</select>';
+  else if(o.type === 'color') inp = '<input type="color" data-path="'+path+'" value="'+esc(hexNormDash(v) || '#22d3ee')+'">';
   else inp = '<input data-path="'+path+'" value="'+esc(v)+'" placeholder="'+esc(o.ph||'')+'">';
   return '<div class="f"><label>'+esc(label)+'</label>'+inp+(o.hint ? '<div class="hint">'+o.hint+'</div>' : '')+'</div>';
 }
+function hexNormDash(h){ h = String(h||'').trim(); return /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(h) ? h : ''; }
 function listField(label, path, hint){   /* newline-separated list (bullets, typeWords) */
   const v = arr(path).join('\n');
   return '<div class="f"><label>'+esc(label)+'</label><textarea data-list="'+path+'" placeholder="One per line">'+esc(v)+'</textarea><div class="hint">'+(hint||'One item per line.')+'</div></div>';
@@ -470,6 +485,7 @@ const TABS = [
   ['hero','👤','Hero / Profile'],['about','ℹ️','About'],['education','🎓','Education'],['experience','💼','Experience'],
   ['services','🧰','Services'],['skills','🛠️','Skills'],['projects','🚀','Projects'],['certs','🏅','Certifications'],
   ['testimonials','💬','Testimonials'],['contact','📬','Contact'],['footer','📝','Footer'],['custom','➕','Add Anything'],
+  ['design','🎨','Portfolio Control'],
   ['analytics','📊','Analytics'],['messages','✉️','Messages'],
   ['settings','⚙️','Settings'],['preview','👁️','Preview']
 ];
@@ -622,11 +638,75 @@ R.custom = function(){
     }).join('')+
     addBtn('Add section',p,{eyebrow:'',title:'New section',sub:'',visible:true,blocks:[]});
 };
+/* ---- 🎨 Portfolio Control (التحكم في شكل الموقع) ---- */
+const DESIGN_ACCENTS = [['cyan','#22d3ee'],['emerald','#34d399'],['violet','#a78bfa'],['amber','#fbbf24'],['rose','#fb7185']];
+function designSwatches(){
+  const cur = getPath(CONTENT,'design.colors.accent') || 'cyan';
+  return '<div class="swatches">'+
+    DESIGN_ACCENTS.map(a=>'<button class="swatch'+(cur===a[0]?' active':'')+'" style="background:'+a[1]+'" data-act="design-accent" data-v="'+a[0]+'" title="'+a[0]+'">'+(cur===a[0]?'<span class="tick">✓</span>':'')+'</button>').join('')+
+    '<button class="swatch'+(cur==='custom'?' active':'')+'" style="background:conic-gradient(#f43f5e,#fbbf24,#34d399,#38bdf8,#a78bfa,#f43f5e)" data-act="design-accent" data-v="custom" title="custom">'+(cur==='custom'?'<span class="tick">✓</span>':'')+'</button>'+
+  '</div>';
+}
+R.design = function(){
+  const custom = hexNormDash(getPath(CONTENT,'design.colors.custom')) || '#22d3ee';
+  return '<h2>Portfolio Control</h2>'+
+    '<div class="desc">التحكم في شكل الموقع: <b>Theme · Colors · Fonts · Animations · Layout · Navbar · Footer · Background · Cards · Buttons</b>. الإعدادات بتتحفظ مع المحتوى في Supabase وبتتطبق على الموقع بعد <b>Save to Supabase</b> — جرّبها قبلها لايف في تبويب <b>Preview</b>.</div>'+
+    '<div class="card"><h3>🌗 Theme<span class="line"></span></h3>'+
+      field('Theme mode','design.theme',{type:'select',options:[{v:'auto',l:'Auto — الزائر يبدّل بين الغامق والفاتح'},{v:'dark',l:'Dark — غامق دائمًا'},{v:'light',l:'Light — فاتح دائمًا'}],hint:'لو اخترت Dark أو Light هيتخفي زرار التبديل من الموقع والثيم يبقى ثابت للكل.'})+
+    '</div>'+
+    '<div class="card"><h3>🎨 Colors<span class="line"></span></h3>'+
+      '<div class="f"><label>Accent color</label>'+designSwatches()+'<div class="hint">خمس ألوان جاهزة + خيار Custom بلونك الخاص.</div></div>'+
+      field('Custom accent','design.colors.custom',{type:'color',hint:'بيشتغل لما تختار Custom — الموقع بيولّد منه درجات متناسقة تلقائيًا (وكمان لون الجزيئات في الخلفية بيتغير معاه).'})+
+    '</div>'+
+    '<div class="card"><h3>🔤 Font<span class="line"></span></h3>'+
+      field('Site font','design.font',{type:'select',options:[{v:'system',l:'System default (الحالي)'},{v:'inter',l:'Inter'},{v:'poppins',l:'Poppins'},{v:'montserrat',l:'Montserrat'},{v:'cairo',l:'Cairo — مناسب للعربي'},{v:'jetbrains',l:'JetBrains Mono — ستايل برمجي'}],hint:'الخط بيتحمّل من Google Fonts تلقائيًا لما تغيّره.'})+
+    '</div>'+
+    '<div class="card"><h3>✨ Animations<span class="line"></span></h3>'+
+      field('Animations level','design.animations',{type:'select',options:[{v:'full',l:'Full — كل الحركات (جزيئات + كتابة + 3D tilt)'},{v:'reduced',l:'Reduced — حركات خفيفة بدون جزيئات'},{v:'off',l:'Off — ظهور فوري بدون أي حركة'}],hint:'مفيد لو عايز الموقع أسرع أو شكل أكثر جدية.'})+
+    '</div>'+
+    '<div class="card"><h3>📐 Layout<span class="line"></span></h3>'+
+      '<div class="row">'+
+        field('Content width','design.layout.width',{type:'select',options:[{v:'normal',l:'Normal — 1180px'},{v:'wide',l:'Wide — 1360px'}]})+
+        field('Section spacing','design.layout.spacing',{type:'select',options:[{v:'compact',l:'Compact — أقرب'},{v:'normal',l:'Normal'},{v:'roomy',l:'Roomy — أكبر مساحة'}]})+
+      '</div>'+
+    '</div>'+
+    '<div class="card"><h3>🧭 Navbar<span class="line"></span></h3>'+
+      field('Navbar style','design.navbar.style',{type:'select',options:[{v:'glass',l:'Glass — شفاف ببلور (الحالي)'},{v:'solid',l:'Solid — خلفية صلبة'},{v:'minimal',l:'Minimal — شفاف تمامًا'}]})+
+      '<label class="switch-row"><input type="checkbox" data-bool="design.navbar.sticky"'+(getPath(CONTENT,'design.navbar.sticky')!==false?' checked':'')+'><span>Sticky — الناف بار يفضل ثابت فوق أثناء السكرول</span></label>'+
+    '</div>'+
+    '<div class="card"><h3>🌌 Background<span class="line"></span></h3>'+
+      field('Background style','design.background.style',{type:'select',options:[{v:'grid',l:'Grid — خطوط شبكة (الحالي)'},{v:'dots',l:'Dots — نقاط'},{v:'aurora',l:'Aurora — شبكة خفيفة + توهج أقوى'},{v:'plain',l:'Plain — خلفية سادة'}]})+
+      '<label class="switch-row"><input type="checkbox" data-bool="design.background.particles"'+(getPath(CONTENT,'design.background.particles')!==false?' checked':'')+'><span>Particles — الجزيئات المتحركة في الخلفية</span></label>'+
+      '<label class="switch-row"><input type="checkbox" data-bool="design.background.glow"'+(getPath(CONTENT,'design.background.glow')!==false?' checked':'')+'><span>Glow — دوائر التوهج الملونة</span></label>'+
+    '</div>'+
+    '<div class="card"><h3>🃏 Cards<span class="line"></span></h3>'+
+      '<div class="row">'+
+        field('Card style','design.cards.style',{type:'select',options:[{v:'glass',l:'Glass — شفاف ببلور (الحالي)'},{v:'solid',l:'Solid — خلفية صلبة'},{v:'outline',l:'Outline — شفاف بحدود أوضح'}]})+
+        field('Card radius','design.cards.radius',{type:'select',options:[{v:'sm',l:'Small — 12px'},{v:'md',l:'Medium — 18px'},{v:'lg',l:'Large — 26px'}]})+
+      '</div>'+
+      '<label class="switch-row"><input type="checkbox" data-bool="design.cards.hover"'+(getPath(CONTENT,'design.cards.hover')!==false?' checked':'')+'><span>Hover lift — الكروت تطلع لفوق عند تحويم الماوس</span></label>'+
+    '</div>'+
+    '<div class="card"><h3>🔘 Buttons<span class="line"></span></h3>'+
+      '<div class="row">'+
+        field('Button style','design.buttons.style',{type:'select',options:[{v:'gradient',l:'Gradient — تدرج (الحالي)'},{v:'solid',l:'Solid — لون واحد'},{v:'outline',l:'Outline — شفاف بحدود'}]})+
+        field('Button radius','design.buttons.radius',{type:'select',options:[{v:'square',l:'Square — حاد'},{v:'rounded',l:'Rounded — 11px'},{v:'pill',l:'Pill — دائري بالكامل'}]})+
+      '</div>'+
+    '</div>'+
+    '<div class="card"><h3>📝 Footer<span class="line"></span></h3>'+
+      '<label class="switch-row"><input type="checkbox" data-bool="design.footer.visible"'+(getPath(CONTENT,'design.footer.visible')!==false?' checked':'')+'><span>Visible — إظهار الفوتر</span></label>'+
+      field('Footer style','design.footer.style',{type:'select',options:[{v:'default',l:'Default'},{v:'minimal',l:'Minimal — بدون خط علوي وأصغر'},{v:'standout',l:'Standout — خط متدرج ملون وخلفية'}]})+
+      '<div class="hint">نصوص الفوتر نفسها بتتعدل من تبويب <b>Footer</b>.</div>'+
+    '</div>'+
+    '<div class="card"><h3>↺ Reset<span class="line"></span></h3>'+
+      '<button class="mini danger" data-act="design-reset">↺ Reset design to defaults</button>'+
+      '<div class="hint">يرجّع كل إعدادات الشكل لوضعها الافتراضي — من غير ما يلمس المحتوى. متنساش تعمل Save بعد أي تغيير.</div>'+
+    '</div>';
+};
 R.settings = function(){
   const sec = CONTENT.settings.sections || {};
   const keys = ['about','education','experience','services','skills','projects','certifications','testimonials','contact'];
   return '<h2>Settings</h2><div class="desc">Appearance, visibility, password & backups.</div>'+
-    '<div class="card"><h3>Appearance<span class="line"></span></h3>'+field('Accent color','settings.accent',{type:'select',options:ACCENT_OPTS})+'</div>'+
+    '<div class="card"><h3>Appearance<span class="line"></span></h3><p style="color:var(--muted);font-size:13px">Theme, colors, fonts, animations, layout, navbar, background, cards & buttons كلها اتنقلت لتبويب <b>🎨 Portfolio Control</b>. لون الـ Accent القديم هنا اتمنع — قيمته اتندمجت تلقائيًا في الإعدادات الجديدة.</p></div>'+
     '<div class="card"><h3>CV link<span class="line"></span></h3>'+
       '<div class="row">'+field('CV URL','settings.cvUrl',{ph:'Mena-Medhat-CV.pdf or https://drive.google.com/…'})+field('Button label','settings.cvLabel',{ph:'Download CV'})+'</div>'+
       '<div class="hint">اختياري: لو رفعت CV من تبويب <b>Hero</b> بياخد الأولوية على اللينك ده. لو اللينك فاضي بيستخدم الملف الافتراضي <code>Mena-Medhat-CV.pdf</code>. تقدر تخفي الزرار كله من تبويب Hero.</div></div>'+
@@ -857,13 +937,15 @@ main.addEventListener('click', async e => {
   if(act === 'import'){ if(!CONTENT.__empty && !confirm('This replaces your current edits with the content baked in index.html. Continue?')) return; importFromSite(); return; }
   if(act === 'export'){ exportJson(); return; }
   if(act === 'bake'){ bakeIndexHtml(); return; }
-  if(act === 'restore'){ pickFile('application/json', async f => { try{ const j = JSON.parse(await f.text()); CONTENT = deepMerge(deepClone(EMPTY_CONTENT), j); CONTENT.__empty = false; markDirty(); renderTab(currentTab); flash('Restored — click Save'); }catch(err){ flash('Invalid JSON', 'err'); } }); return; }
+  if(act === 'restore'){ pickFile('application/json', async f => { try{ const j = JSON.parse(await f.text()); CONTENT = deepMerge(deepClone(EMPTY_CONTENT), j); if(!j.design && j.settings && j.settings.accent && CONTENT.design) CONTENT.design.colors.accent = j.settings.accent; CONTENT.__empty = false; markDirty(); renderTab(currentTab); flash('Restored — click Save'); }catch(err){ flash('Invalid JSON', 'err'); } }); return; }
   if(act === 'change-pass'){
     const a = document.getElementById('newPass').value, c = document.getElementById('newPass2').value;
     if(a.length < 4){ flash('Min 4 characters', 'err'); return; } if(a !== c){ flash('Passwords do not match', 'err'); return; }
     try{ await sbRpc('change_password', { p_old: PASSWORD, p_new: a }); PASSWORD = a; sessionStorage.setItem(SESSION_KEY, a); flash('Password changed ✓'); document.getElementById('newPass').value = document.getElementById('newPass2').value = ''; }
     catch(err){ flash('Failed: ' + err.message, 'err'); } return; }
   if(act === 'pv-desktop' || act === 'pv-mobile'){ document.getElementById('previewFrame').classList.toggle('mobile', act === 'pv-mobile'); return; }
+  if(act === 'design-accent'){ setPath(CONTENT, 'design.colors.accent', b.dataset.v); markDirty(); renderTab(currentTab); return; }
+  if(act === 'design-reset'){ if(!confirm('Reset all design settings (theme, colors, fonts, animations, layout…) to defaults?')) return; setPath(CONTENT, 'design', deepClone(EMPTY_CONTENT.design)); markDirty(); renderTab(currentTab); return; }
   if(act === 'pv-refresh'){ const fr = document.getElementById('previewFrame'); fr.src = 'index.html?preview=' + Date.now(); return; }
   if(act === 'analytics-refresh'){ loadAnalytics(); return; }
   if(act === 'msg-filter'){ msgFilter = b.dataset.filter; loadMessages(); return; }
@@ -881,6 +963,26 @@ main.addEventListener('click', async e => {
     }catch(e){
       b.disabled = false;
       if(/WRONG_PASSWORD/.test(e.message)){ flash('Session expired — please log in again', 'err'); doLogout(); }
+      else flash('Failed: ' + e.message, 'err');
+    }
+    return; }
+});
+</script>
+</body>
+</html>
+t });
+      if(ok === true) loadMessages(); else flash('Message not found', 'err');
+    }catch(e){
+      b.disabled = false;
+      if(/WRONG_PASSWORD/.test(e.message)){ flash('Session expired — please log in again', 'err'); doLogout(); }
+      else flash('Failed: ' + e.message, 'err');
+    }
+    return; }
+});
+</script>
+</body>
+</html>
+; }
       else flash('Failed: ' + e.message, 'err');
     }
     return; }
