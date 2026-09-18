@@ -182,6 +182,22 @@ returns jsonb language sql immutable as $$
    where not (e.key = any(known));
 $$;
 
+create or replace function public.pb_event_source(p_meta jsonb, p_path text)
+returns text language sql immutable as $$
+  select lower(left(coalesce(
+           nullif(p_meta ->> 'source', ''),
+           substring(coalesce(p_path, '') from 'utm_source=([^&]+)'),
+           case when coalesce(p_path, '') like '%fbclid=%' then 'facebook' else 'direct' end), 40));
+$$;
+
+create or replace function public.pb_clean_path(p text)
+returns text language sql immutable as $$
+  select left(rtrim(replace(regexp_replace(regexp_replace(regexp_replace(coalesce(p, '/'),
+           '[?&]fbclid=[^&]*', '', 'g'),
+           '[?&]gclid=[^&]*',  '', 'g'),
+           '[?&]igshid=[^&]*', '', 'g'), '?&', '?'), '?&'), 180);
+$$;
+
 create or replace function public.write_portfolio_content(p_content jsonb)
 returns void
 language plpgsql security definer set search_path = public as $$
@@ -569,9 +585,7 @@ as $$
     /* where visitors came from: meta.source (new rows) or utm/fbclid in path (old rows) */
     select coalesce(
       (select jsonb_agg(jsonb_build_object('source', s.src, 'visits', s.cnt) order by s.cnt desc)
-         from (select coalesce(nullif(ev.meta->>'source', ''),
-                             substring(ev.path from 'utm_source=([^&]+)'),
-                             case when ev.path like '%fbclid=%' then 'facebook' else 'direct' end) as src,
+         from (select public.pb_event_source(ev.meta, ev.path) as src,
                       count(*) as cnt
                  from ev
                 where event = 'view'
@@ -611,6 +625,117 @@ end $$;
 grant execute on function public.get_analytics(int)                   to anon, authenticated;
 grant execute on function public.update_message(text, bigint, text)   to anon, authenticated;
 
+
+-- =====================================================================
+--  PART G - VISITOR DATA MADE READABLE (one-time cleanup + views + retention)
+-- =====================================================================
+
+-- 1) one-time hygiene for OLD rows (every statement below is a no-op once done)
+--    ORDER MATTERS: derive the source from the path BEFORE stripping fbclid from it
+update public.portfolio_events
+   set event = 'cv_download'
+ where event = 'download_cv';
+
+update public.portfolio_events
+   set meta = coalesce(meta, '{}'::jsonb) || jsonb_build_object('source', public.pb_event_source(coalesce(meta, '{}'::jsonb), path))
+ where event = 'view'
+   and nullif(meta ->> 'source', '') is null;
+
+update public.portfolio_events
+   set path = public.pb_clean_path(path)
+ where path is distinct from public.pb_clean_path(path);
+
+-- 2) readable views - they show up in Supabase -> Table Editor
+
+-- one row per visitor
+create or replace view public.site_visitors as
+select
+  coalesce(visitor_id, '(unknown)')                          as visitor_id,
+  count(*) filter (where event = 'view')                     as visits,
+  min(created_at) filter (where event = 'view')              as first_visit,
+  max(created_at)                                            as last_seen,
+  mode() within group (order by public.pb_event_source(meta, path)) filter (where event = 'view') as main_source,
+  count(*) filter (where event = 'project_view')             as project_opens,
+  count(*) filter (where event in ('cv_download', 'download_cv')) as cv_downloads,
+  count(*) filter (where event in ('contact_submit', 'generate_lead')) as form_submits,
+  count(*)                                                   as total_events
+from public.portfolio_events
+group by coalesce(visitor_id, '(unknown)');
+
+-- one row per day
+create or replace view public.site_traffic_daily as
+select
+  date_trunc('day', created_at)::date                                   as day,
+  count(distinct coalesce(visitor_id, 'anon')) filter (where event = 'view') as visitors,
+  count(*) filter (where event = 'view')                                as visits,
+  count(*) filter (where event = 'project_view')                        as project_opens,
+  count(*) filter (where event in ('cv_download', 'download_cv'))       as cv_downloads,
+  count(*) filter (where event in ('github_click', 'linkedin_click'))   as social_clicks,
+  count(*) filter (where event in ('contact_submit', 'generate_lead'))  as form_submits,
+  count(*)                                                              as total_events
+from public.portfolio_events
+group by 1;
+
+-- the raw log, but human-readable
+create or replace view public.site_events_log as
+select
+  created_at                                                             as time,
+  case event
+    when 'view'           then 'Visited the site'
+    when 'project_view'   then 'Opened project: ' || coalesce(meta ->> 'project', meta ->> 'title', '?')
+    when 'cv_download'    then 'Downloaded CV'
+    when 'download_cv'    then 'Downloaded CV'
+    when 'github_click'   then 'Clicked GitHub'
+    when 'linkedin_click' then 'Clicked LinkedIn'
+    when 'contact_submit' then 'Sent a message'
+    when 'generate_lead'  then 'Sent a message (lead)'
+    else event
+  end                                                                    as what_happened,
+  coalesce(visitor_id, '(unknown)')                                      as visitor,
+  /* the visitor's main traffic source (falls back to this event's own derivation) */
+  coalesce(
+    (select mode() within group (order by public.pb_event_source(v.meta, v.path))
+       from public.portfolio_events v
+      where v.visitor_id = portfolio_events.visitor_id and v.event = 'view'),
+    public.pb_event_source(meta, path))                                  as source,
+  coalesce(meta ->> 'project', meta ->> 'title', meta ->> 'url', meta ->> 'email', '') as details,
+  path
+from public.portfolio_events
+order by created_at desc;
+
+comment on view public.site_visitors       is 'One row per visitor: visits, first/last seen, main traffic source, actions';
+comment on view public.site_traffic_daily  is 'One row per day: visitors, visits, opens, downloads, clicks, form submits';
+comment on view public.site_events_log     is 'Every visitor event in plain English, newest first';
+comment on function public.pb_event_source(jsonb, text) is 'Traffic source for one event (meta.source, utm_source, fbclid or direct)';
+comment on function public.pb_clean_path(text) is 'Strips fbclid/gclid/igshid tracking junk from a path';
+
+grant select on public.site_visitors, public.site_traffic_daily, public.site_events_log
+  to anon, authenticated;
+
+-- 3) indexes that keep the views fast as the log grows
+create index if not exists portfolio_events_event_idx   on public.portfolio_events (event, created_at desc);
+create index if not exists portfolio_events_visitor_idx on public.portfolio_events (visitor_id);
+
+-- 4) automatic retention: events older than 180 days are deleted daily
+--    (guarded - if pg_cron is not available the rest of the script is unaffected)
+do $$
+begin
+  create extension if not exists pg_cron;
+exception
+  when others then raise notice 'pg_cron not available - retention job skipped (events are kept forever)';
+end $$;
+
+do $$
+begin
+  perform cron.unschedule('portfolio_events_cleanup')
+   where exists (select 1 from cron.job where jobname = 'portfolio_events_cleanup');
+  perform cron.schedule('portfolio_events_cleanup', '0 3 * * *',
+                        'delete from public.portfolio_events where created_at < now() - interval ''180 days''');
+  raise notice 'retention scheduled: events older than 180 days are removed daily at 03:00 UTC';
+exception
+  when others then raise notice 'retention not scheduled (%) - events are kept forever', sqlerrm;
+end $$;
+
 do $$
 declare r int;
 begin
@@ -625,6 +750,8 @@ begin
   raise notice 'site_testimonials   : % rows', (select count(*) from public.site_testimonials);
   raise notice 'portfolio (view)    : content size = % chars',
               length((select content::text from public.portfolio where id = 'main'));
+  raise notice 'site_visitors       : % visitors tracked', (select count(*) from public.site_visitors);
+  raise notice 'portfolio_events    : % events (older than 180 days auto-deleted daily)', (select count(*) from public.portfolio_events);
   raise notice 'Open Supabase -> Table Editor to see the new tables.';
   raise notice '------------------------------------------';
 end $$;

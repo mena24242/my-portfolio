@@ -780,7 +780,7 @@ function analyticsFromRows(rows, days){
   const t = { view:0, unique_visitors:0, project_view:0, cv_download:0, github_click:0, linkedin_click:0, contact_submit:0 };
   const visitors = new Set(), perDay = {}, proj = {}, src = {};
   for(let i = 0; i <= days; i++){ perDay[new Date(Date.now() - (days - i) * 864e5).toISOString().slice(0,10)] = { v: new Set(), n: 0 }; } /* inclusive ends = 31 rows, same as SQL */
-  const srcOf = e => (e.meta && e.meta.source) || ((e.path || '').match(/utm_source=([^&]+)/) || [])[1] || (/fbclid=/.test(e.path || '') ? 'facebook' : 'direct');
+  const srcOf = e => String((e.meta && e.meta.source) || ((e.path || '').match(/utm_source=([^&]+)/) || [])[1] || (/fbclid=/.test(e.path || '') ? 'facebook' : 'direct')).toLowerCase().slice(0, 40);
   (rows || []).forEach(e => {
     const k = String(e.created_at || '').slice(0, 10);
     if(!(k in perDay)) return;
