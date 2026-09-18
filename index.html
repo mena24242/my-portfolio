@@ -727,6 +727,7 @@ const SB_CACHE_KEY = "mm_sb_content_cache";
 function sbReady(){ return !!(window.SUPABASE_URL && window.SUPABASE_ANON_KEY); }
 function fetchSupabaseContent(){
   if(!sbReady()) return Promise.reject(new Error('Supabase not configured'));
+  if(typeof fetch !== 'function') return Promise.reject(new Error('fetch not available'));
   const url = window.SUPABASE_URL.replace(/\/$/,'') + '/rest/v1/portfolio?id=eq.main&select=content,updated_at';
   return fetch(url, { headers: { apikey: window.SUPABASE_ANON_KEY, Authorization: 'Bearer ' + window.SUPABASE_ANON_KEY }, cache: 'no-store' })
     .then(r => { if(!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
@@ -742,6 +743,66 @@ function applyRemoteContent(remote){
   renderAll();
   applyTrackingFromSettings();
 }
+
+/* =====================================================================
+   SUPABASE EVENT LOGGING (portfolio_events)
+===================================================================== */
+const SB_MM = {
+  get url(){ return (window.SUPABASE_URL || 'https://agnwildabkhiynakumbd.supabase.co').replace(/\/$/, ''); },
+  get key(){ return window.SUPABASE_ANON_KEY || 'sb_publishable_BMIU028OeN2lpFEX5RfivQ_zW_xIQM9'; },
+  ready: function(){ return !!(this.url && this.key); },
+  headers: function(extra){
+    var k = this.key;
+    return Object.assign({
+      'apikey': k,
+      'Authorization': 'Bearer ' + k,
+      'Content-Type': 'application/json',
+      'Prefer': 'return=minimal'
+    }, extra || {});
+  }
+};
+window.SB_MM = SB_MM;
+
+var MM_VID = (function(){
+  try{
+    var id = localStorage.getItem('mm_vid');
+    if(!id){
+      id = 'v_' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+      localStorage.setItem('mm_vid', id);
+    }
+    return id;
+  }catch(_e){
+    return 'v_' + Math.random().toString(36).slice(2, 10);
+  }
+})();
+window.MM_VID = MM_VID;
+
+function mmTrack(event, meta){
+  try{
+    if(typeof fetch !== 'function') return Promise.resolve();
+    var sbUrl = SB_MM.url;
+    var sbKey = SB_MM.key;
+    if(!sbUrl || !sbKey) return Promise.resolve();
+    var payload = {
+      event: event,
+      visitor_id: MM_VID,
+      meta: (meta && typeof meta === 'object') ? meta : (meta ? { value: meta } : {}),
+      path: (typeof location !== 'undefined' && location.pathname) ? (location.pathname + (location.search || '') + (location.hash || '')) : '/'
+    };
+    return fetch(sbUrl + '/rest/v1/portfolio_events', {
+      method: 'POST',
+      headers: SB_MM.headers(),
+      body: JSON.stringify(payload)
+    }).catch(function(){});
+  }catch(_e){
+    return Promise.resolve();
+  }
+}
+window.mmTrack = mmTrack;
+
+try{
+  mmTrack('view');
+}catch(_e){}
 
 const DEFAULT_CONTENT = {
   brand: { name: "Mena Medhat", tag: "Mechatronics" },
@@ -1120,6 +1181,7 @@ function decodeEntities(str){
 }
 
 function mtFetchChunk(text, dir){
+  if(typeof fetch !== 'function') return Promise.reject(new Error('fetch not available'));
   const url = MT_ENDPOINT + '?q=' + encodeURIComponent(text) + '&langpair=' + encodeURIComponent(dir);
   return fetch(url).then(r => {
     if(!r.ok) throw new Error('http ' + r.status);
@@ -1794,6 +1856,10 @@ function startTyping(){
 
 let counterObserver = null, revealObserver = null;
 function setupObservers(){
+  if(typeof IntersectionObserver !== 'function'){
+    document.querySelectorAll('.reveal').forEach(el => el.classList.add('visible'));
+    return;
+  }
   if(revealObserver) revealObserver.disconnect();
   if(counterObserver) counterObserver.disconnect();
   revealObserver = new IntersectionObserver((entries)=>{
@@ -1864,6 +1930,7 @@ document.addEventListener('mousemove', function(e){
 });
 const bursts = [];
 document.addEventListener('pointerdown', function(e){
+  if(!ctx) return;
   for(let i=0;i<14;i++){
     const a = Math.random()*Math.PI*2, sp = 1 + Math.random()*2.5;
     bursts.push({ x:e.clientX, y:e.clientY, vx:Math.cos(a)*sp, vy:Math.sin(a)*sp, life:1 });
@@ -1874,35 +1941,43 @@ document.addEventListener('pointerdown', function(e){
    PARTICLES
 ===================================================================== */
 const canvas = document.getElementById('particles');
-const ctx = canvas.getContext('2d');
+const ctx = canvas && typeof canvas.getContext === 'function' ? canvas.getContext('2d') : null;
 let W,H,pts=[];
-function resize(){ W=canvas.width=window.innerWidth; H=canvas.height=window.innerHeight; }
-resize(); window.addEventListener('resize', resize);
-const N = Math.min(70, Math.floor(window.innerWidth/18));
-for(let i=0;i<N;i++) pts.push({x:Math.random()*W,y:Math.random()*H,vx:(Math.random()-.5)*.35,vy:(Math.random()-.5)*.35,r:Math.random()*1.6+.4,o:Math.random()*.5+.15});
-function draw(){
-  ctx.clearRect(0,0,W,H);
-  for(const p of pts){
-    p.x+=p.vx; p.y+=p.vy;
-    if(p.x<0||p.x>W) p.vx*=-1;
-    if(p.y<0||p.y>H) p.vy*=-1;
-    ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,Math.PI*2);
-    ctx.fillStyle='rgba('+PARTICLE_RGB+','+p.o+')'; ctx.fill();
-  }
-  for(let i=0;i<pts.length;i++) for(let j=i+1;j<pts.length;j++){
-    const dx=pts[i].x-pts[j].x, dy=pts[i].y-pts[j].y, d=Math.hypot(dx,dy);
-    if(d<120){ ctx.beginPath(); ctx.moveTo(pts[i].x,pts[i].y); ctx.lineTo(pts[j].x,pts[j].y); ctx.strokeStyle='rgba('+PARTICLE_RGB+','+(0.08*(1-d/120))+')'; ctx.lineWidth=1; ctx.stroke(); }
-  }
-  for(let k=bursts.length-1;k>=0;k--){
-    const b = bursts[k];
-    b.x+=b.vx; b.y+=b.vy; b.vy+=0.05; b.life-=0.02;
-    if(b.life<=0){ bursts.splice(k,1); continue; }
-    ctx.beginPath(); ctx.arc(b.x,b.y,2.2*b.life+0.4,0,Math.PI*2);
-    ctx.fillStyle='rgba('+PARTICLE_RGB+','+(b.life*.8)+')'; ctx.fill();
-  }
-  requestAnimationFrame(draw);
+function resize(){
+  if(!canvas) return;
+  W = canvas.width = (typeof window !== 'undefined' ? window.innerWidth : 1200) || 1200;
+  H = canvas.height = (typeof window !== 'undefined' ? window.innerHeight : 800) || 800;
 }
-draw();
+if(canvas && ctx){
+  resize();
+  window.addEventListener('resize', resize);
+  const N = Math.min(70, Math.floor(((typeof window !== 'undefined' ? window.innerWidth : 1200) || 1200)/18));
+  for(let i=0;i<N;i++) pts.push({x:Math.random()*W,y:Math.random()*H,vx:(Math.random()-.5)*.35,vy:(Math.random()-.5)*.35,r:Math.random()*1.6+.4,o:Math.random()*.5+.15});
+  function draw(){
+    if(!ctx) return;
+    ctx.clearRect(0,0,W,H);
+    for(const p of pts){
+      p.x+=p.vx; p.y+=p.vy;
+      if(p.x<0||p.x>W) p.vx*=-1;
+      if(p.y<0||p.y>H) p.vy*=-1;
+      ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,Math.PI*2);
+      ctx.fillStyle='rgba('+PARTICLE_RGB+','+p.o+')'; ctx.fill();
+    }
+    for(let i=0;i<pts.length;i++) for(let j=i+1;j<pts.length;j++){
+      const dx=pts[i].x-pts[j].x, dy=pts[i].y-pts[j].y, d=Math.hypot(dx,dy);
+      if(d<120){ ctx.beginPath(); ctx.moveTo(pts[i].x,pts[i].y); ctx.lineTo(pts[j].x,pts[j].y); ctx.strokeStyle='rgba('+PARTICLE_RGB+','+(0.08*(1-d/120))+')'; ctx.lineWidth=1; ctx.stroke(); }
+    }
+    for(let k=bursts.length-1;k>=0;k--){
+      const b = bursts[k];
+      b.x+=b.vx; b.y+=b.vy; b.vy+=0.05; b.life-=0.02;
+      if(b.life<=0){ bursts.splice(k,1); continue; }
+      ctx.beginPath(); ctx.arc(b.x,b.y,2.2*b.life+0.4,0,Math.PI*2);
+      ctx.fillStyle='rgba('+PARTICLE_RGB+','+(b.life*.8)+')'; ctx.fill();
+    }
+    if(typeof requestAnimationFrame === 'function') requestAnimationFrame(draw);
+  }
+  draw();
+}
 
 /* =====================================================================
    NAV / SCROLL / MENU / FORM
@@ -1926,7 +2001,7 @@ const mobileMenu = document.getElementById('mobileMenu');
 burger.addEventListener('click', ()=>{ burger.classList.toggle('open'); mobileMenu.classList.toggle('open'); });
 mobileMenu.querySelectorAll('a').forEach(a=> a.addEventListener('click', ()=>{ burger.classList.remove('open'); mobileMenu.classList.remove('open'); }));
 
-/* Contact form: messages are delivered directly to the owner's inbox via Web3Forms. */
+/* Contact form: dual submit in parallel to Web3Forms and Supabase (portfolio_messages). Succeeds if either succeeds. */
 const WEB3FORMS_ENDPOINT = 'https://api.web3forms.com/submit';
 const WEB3FORMS_ACCESS_KEY = String((CONTENT && CONTENT.settings && CONTENT.settings.web3formsKey) || window.WEB3FORMS_ACCESS_KEY || '60002f5f-73bc-4bcb-aef9-9dbddf2ebec8').trim() || '60002f5f-73bc-4bcb-aef9-9dbddf2ebec8';
 
@@ -1934,44 +2009,119 @@ document.addEventListener('submit', function(e){
   if(e.target && e.target.id === 'contactForm'){
     e.preventDefault();
     var form = e.target;
-    var name = form.elements.namedItem('name').value.trim();
-    var email = form.elements.namedItem('email').value.trim();
-    var msg = form.elements.namedItem('message').value.trim();
+    var name = (form.elements.namedItem('name') ? form.elements.namedItem('name').value : '').trim();
+    var email = (form.elements.namedItem('email') ? form.elements.namedItem('email').value : '').trim();
+    var msg = (form.elements.namedItem('message') ? form.elements.namedItem('message').value : '').trim();
     var status = form.querySelector('#formStatus');
     var btn = form.querySelector('button[type="submit"]');
-    var original = btn.innerHTML;
+    var original = btn ? btn.innerHTML : 'Send';
     var curKey = (typeof getWeb3Key === 'function' ? getWeb3Key() : WEB3FORMS_ACCESS_KEY);
-    btn.disabled = true;
-    btn.textContent = t('Sending…');
+
+    if(btn){
+      btn.disabled = true;
+      btn.textContent = t('Sending…');
+    }
     if(status){ status.textContent = ''; status.className = 'form-status'; }
-    try{ if(window.trackEvent) trackEvent('contact_submit', {name:name}); }catch(_e){}
-    fetch(WEB3FORMS_ENDPOINT, {
-      method: 'POST',
-      headers: { 'Accept':'application/json', 'Content-Type':'application/json' },
-      body: JSON.stringify({
-        access_key: curKey,
-        subject: 'New portfolio message from '+name,
-        from_name: name,
-        replyto: email,
-        name: name,
-        email: email,
-        message: msg,
-        botcheck: false
-      })
-    }).then(function(r){
-      if(!r.ok) throw new Error('http '+r.status);
-      return r.json();
-    }).then(function(d){
-      if(d && d.success === false){ throw new Error(d.message || 'form failed'); }
-      if(status){ status.textContent = t('Message sent! I\'ll get back to you soon. ✓'); status.className = 'form-status ok'; }
+
+    try{
+      if(window.trackEvent) trackEvent('contact_submit', { name: name, email: email });
+      if(window.mmTrack) mmTrack('contact_submit', { name: name, email: email });
+    }catch(_e){}
+
+    var pWeb3 = (function(){
+      if(typeof fetch !== 'function') return Promise.reject(new Error('fetch not available'));
+      return fetch(WEB3FORMS_ENDPOINT, {
+        method: 'POST',
+        headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          access_key: curKey,
+          subject: 'New portfolio message from ' + name,
+          from_name: name,
+          replyto: email,
+          name: name,
+          email: email,
+          message: msg,
+          botcheck: false
+        })
+      }).then(function(r){
+        if(!r.ok) throw new Error('Web3Forms HTTP ' + r.status);
+        return r.json();
+      }).then(function(d){
+        if(d && d.success === false) throw new Error(d.message || 'Web3Forms failed');
+        return d;
+      });
+    })();
+
+    var pSupabase = (function(){
+      if(typeof fetch !== 'function') return Promise.reject(new Error('fetch not available'));
+      var sbUrl = (window.SB_MM && window.SB_MM.url) || (window.SUPABASE_URL || '').replace(/\/$/, '');
+      var sbHeaders = (window.SB_MM && typeof window.SB_MM.headers === 'function')
+        ? window.SB_MM.headers()
+        : {
+            'apikey': window.SUPABASE_ANON_KEY || '',
+            'Authorization': 'Bearer ' + (window.SUPABASE_ANON_KEY || ''),
+            'Content-Type': 'application/json',
+            'Prefer': 'return=minimal'
+          };
+      if(!sbUrl) return Promise.reject(new Error('Supabase not configured'));
+      return fetch(sbUrl + '/rest/v1/portfolio_messages', {
+        method: 'POST',
+        headers: sbHeaders,
+        body: JSON.stringify({
+          name: name,
+          email: email,
+          message: msg,
+          visitor_id: (typeof MM_VID !== 'undefined' ? MM_VID : (window.MM_VID || ''))
+        })
+      }).then(function(r){
+        if(!r.ok) throw new Error('Supabase HTTP ' + r.status);
+        return r;
+      });
+    })();
+
+    function parallelAny(promises){
+      return new Promise(function(resolve, reject){
+        var pending = promises.length;
+        var errors = [];
+        var resolved = false;
+        promises.forEach(function(p){
+          Promise.resolve(p).then(function(res){
+            if(!resolved){
+              resolved = true;
+              resolve(res);
+            }
+          }).catch(function(err){
+            errors.push(err);
+            pending--;
+            if(pending === 0 && !resolved){
+              reject(errors);
+            }
+          });
+        });
+      });
+    }
+
+    parallelAny([pWeb3, pSupabase]).then(function(){
+      if(status){ status.textContent = t("Message sent! I'll get back to you soon. ✓"); status.className = 'form-status ok'; }
       form.reset();
-      try{ if(window.trackEvent){ trackEvent('generate_lead', {source:'contact_form', email:email}); if(typeof gtag==='function') gtag('event','generate_lead',{currency:'EGP', value:1}); if(typeof fbq==='function') fbq('track','Lead'); } }catch(_e){}
-    }).catch(function(){
+      try{
+        if(window.trackEvent){
+          trackEvent('generate_lead', { source: 'contact_form', email: email });
+          if(typeof gtag === 'function') gtag('event', 'generate_lead', { currency: 'EGP', value: 1 });
+          if(typeof fbq === 'function') fbq('track', 'Lead');
+        }
+        if(window.mmTrack){
+          mmTrack('generate_lead', { source: 'contact_form', email: email, name: name });
+        }
+      }catch(_e){}
+    }).catch(function(err){
       if(status){ status.textContent = t('Something went wrong — email me directly.'); status.className = 'form-status err'; }
       try{ if(window.trackEvent) trackEvent('contact_failed', {}); }catch(_e){}
     }).finally(function(){
-      btn.disabled = false;
-      btn.innerHTML = original;
+      if(btn){
+        btn.disabled = false;
+        btn.innerHTML = original;
+      }
     });
   }
 });
@@ -2000,21 +2150,90 @@ function shareNow(type, el){
   }
 }
 
-/* global click tracking (CV downloads + any [data-track]) */
+/* global click tracking (CV downloads, GitHub, LinkedIn, Projects, + any [data-track]) — without duplicates */
 document.addEventListener('click', function(e){
-  var ct = e.target.closest('[data-track]');
-  if(!ct) return;
-  var ev = ct.getAttribute('data-track') || 'click';
-  var loc = ct.getAttribute('data-track-location') || ct.id || '';
-  var href = ct.getAttribute('href') || '';
-  try{
-    if(window.trackEvent) trackEvent(ev, {location: loc, href: href});
-    if(typeof gtag === 'function'){
-      if(ev === 'download_cv') gtag('event', 'file_download', {file_name: href, link_url: href, link_text: loc});
-      else gtag('event', ev, {location: loc});
+  // 1) CV Download
+  var cv = e.target.closest('[data-track="download_cv"], a[download], #navCtaDesk, #navCtaMob');
+  if(!cv){
+    var aCv = e.target.closest('a');
+    if(aCv && aCv.getAttribute('href') && /cv\.pdf|\/cv|menamedhatcv/i.test(aCv.getAttribute('href'))){
+      cv = aCv;
     }
-    if(typeof fbq === 'function' && ev === 'download_cv') fbq('trackCustom', 'DownloadCV', {location: loc});
-  }catch(_e){}
+  }
+  if(cv){
+    var cvHref = cv.getAttribute('href') || 'Mena-Medhat-CV.pdf';
+    var cvLoc = cv.getAttribute('data-track-location') || cv.id || 'cv_button';
+    try{
+      if(window.trackEvent) trackEvent('download_cv', { location: cvLoc, href: cvHref });
+      if(typeof gtag === 'function') gtag('event', 'file_download', { file_name: cvHref, link_url: cvHref, link_text: cvLoc });
+      if(typeof fbq === 'function') fbq('trackCustom', 'DownloadCV', { location: cvLoc });
+      if(window.mmTrack) mmTrack('cv_download', { location: cvLoc, href: cvHref });
+    }catch(_e){}
+    return;
+  }
+
+  // 2) GitHub Click (checked before project-card so clicking GitHub inside project doesn't trigger project_view)
+  var gh = e.target.closest('a[href*="github.com"], [data-track="github_click"]');
+  if(gh){
+    var ghHref = gh.getAttribute('href') || '';
+    var ghText = (gh.textContent || '').trim() || 'GitHub';
+    var ghLoc = gh.getAttribute('data-track-location') || gh.id || 'github';
+    try{
+      if(window.trackEvent) trackEvent('github_click', { url: ghHref, text: ghText, location: ghLoc });
+      if(typeof gtag === 'function') gtag('event', 'github_click', { url: ghHref, text: ghText });
+      if(window.mmTrack) mmTrack('github_click', { url: ghHref, text: ghText, location: ghLoc });
+    }catch(_e){}
+    return;
+  }
+
+  // 3) LinkedIn Click
+  var li = e.target.closest('a[href*="linkedin.com"], [data-track="linkedin_click"]');
+  if(li){
+    var liHref = li.getAttribute('href') || '';
+    var liText = (li.textContent || '').trim() || 'LinkedIn';
+    var liLoc = li.getAttribute('data-track-location') || li.id || 'linkedin';
+    try{
+      if(window.trackEvent) trackEvent('linkedin_click', { url: liHref, text: liText, location: liLoc });
+      if(typeof gtag === 'function') gtag('event', 'linkedin_click', { url: liHref, text: liText });
+      if(window.mmTrack) mmTrack('linkedin_click', { url: liHref, text: liText, location: liLoc });
+    }catch(_e){}
+    return;
+  }
+
+  // 4) Project View (click on project card, demo, code, field, or visual)
+  if(e.target.closest('.gal-nav, .gal-dot')) return;
+  var pr = e.target.closest('.project-card, [data-project], .demo-open, .code-open, .field-open, [data-track="project_view"]');
+  if(pr){
+    var prCard = pr.closest('.project-card') || pr;
+    var pTitle = '';
+    var pIndex = (pr.dataset && pr.dataset.index !== undefined) ? pr.dataset.index : (pr.dataset && pr.dataset.project !== undefined ? pr.dataset.project : '');
+    var h3 = prCard.querySelector('h3');
+    if(h3) pTitle = h3.textContent.trim();
+    else if(pr.dataset && pr.dataset.title) pTitle = pr.dataset.title;
+    if(!pTitle && pIndex !== '' && CONTENT && CONTENT.projects && CONTENT.projects.items && CONTENT.projects.items[pIndex]){
+      pTitle = CONTENT.projects.items[pIndex].title || '';
+    }
+    if(!pTitle) pTitle = 'Project';
+    try{
+      if(window.trackEvent) trackEvent('project_view', { project: pTitle, title: pTitle, index: pIndex });
+      if(typeof gtag === 'function') gtag('event', 'project_view', { project: pTitle, title: pTitle });
+      if(window.mmTrack) mmTrack('project_view', { project: pTitle, title: pTitle, index: pIndex });
+    }catch(_e){}
+    return;
+  }
+
+  // 5) Any other generic [data-track]
+  var ct = e.target.closest('[data-track]');
+  if(ct){
+    var ev = ct.getAttribute('data-track') || 'click';
+    var loc = ct.getAttribute('data-track-location') || ct.id || '';
+    var href = ct.getAttribute('href') || '';
+    try{
+      if(window.trackEvent) trackEvent(ev, { location: loc, href: href });
+      if(typeof gtag === 'function') gtag('event', ev, { location: loc, href: href });
+      if(window.mmTrack) mmTrack(ev, { location: loc, href: href });
+    }catch(_e){}
+  }
 });
 
 /* =====================================================================
@@ -2199,8 +2418,8 @@ applyAccent(CONTENT.settings && CONTENT.settings.accent ? CONTENT.settings.accen
 updateLangUI();
 renderAll();
 /* 2) fresh copy from Supabase (skipped inside the dashboard preview iframe, which pushes its own draft) */
-const IS_PREVIEW = /[?&]preview=/.test(location.search);
-if(!IS_PREVIEW) fetchSupabaseContent().then(function(remote){
+const IS_PREVIEW = (typeof location !== 'undefined' && /[?&]preview=/.test(location.search));
+if(!IS_PREVIEW && typeof fetch === 'function') fetchSupabaseContent().then(function(remote){
   try{ localStorage.setItem(SB_CACHE_KEY, JSON.stringify(remote)); }catch(e){}
   applyRemoteContent(remote);
 }).catch(function(err){ console.warn('[portfolio] Supabase content not loaded — using fallback:', err.message); });
