@@ -83,4 +83,48 @@ grant execute on function public.check_password(text)          to anon, authenti
 grant execute on function public.save_portfolio(text, jsonb)   to anon, authenticated;
 grant execute on function public.change_password(text, text)   to anon, authenticated;
 
+-- 5) Analytics events (views, CV downloads, project views, clicks, form submits)
+create table if not exists public.portfolio_events (
+  id          bigserial primary key,
+  event       text not null,
+  visitor_id  text,
+  meta        jsonb default '{}'::jsonb,
+  path        text,
+  created_at  timestamptz not null default now()
+);
+
+-- 6) Contact form messages (stored alongside Web3Forms delivery)
+create table if not exists public.portfolio_messages (
+  id          bigserial primary key,
+  name        text not null,
+  email       text not null,
+  message     text not null,
+  visitor_id  text,
+  created_at  timestamptz not null default now()
+);
+
+-- Security: public (anon) can insert events & messages
+alter table public.portfolio_events   enable row level security;
+alter table public.portfolio_messages enable row level security;
+
+drop policy if exists "portfolio_events insert public" on public.portfolio_events;
+create policy "portfolio_events insert public" on public.portfolio_events
+  for insert with check (true);
+
+drop policy if exists "portfolio_events select public" on public.portfolio_events;
+create policy "portfolio_events select public" on public.portfolio_events
+  for select using (true);
+
+drop policy if exists "portfolio_messages insert public" on public.portfolio_messages;
+create policy "portfolio_messages insert public" on public.portfolio_messages
+  for insert with check (true);
+
+drop policy if exists "portfolio_messages select public" on public.portfolio_messages;
+create policy "portfolio_messages select public" on public.portfolio_messages
+  for select using (true);
+
+grant select, insert on public.portfolio_events   to anon, authenticated;
+grant select, insert on public.portfolio_messages to anon, authenticated;
+grant usage, select on all sequences in schema public to anon, authenticated;
+
 -- Done ✓  Now open dashboard.html → login → "Import current site" → Save.
