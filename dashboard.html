@@ -193,7 +193,7 @@ const EMPTY_CONTENT = {
   testimonials:{eyebrow:'Testimonials',title:'What People Say',sub:'',items:[]},
   contact:{eyebrow:'Contact',title:"Let's Build Something",sub:'',email:'',phone:'',phoneDisplay:'',linkedin:'',linkedinUrl:'',github:'',githubUrl:'',location:''},
   footer:{line1:'',line2:''},
-  settings:{accent:'cyan',sections:{about:true,education:true,experience:true,services:true,skills:true,projects:true,certifications:true,testimonials:false,contact:true}},
+  settings:{accent:'cyan',gtagId:'',metaPixelId:'',web3formsKey:'',cvUrl:'',cvLabel:'',sections:{about:true,education:true,experience:true,services:true,skills:true,projects:true,certifications:true,testimonials:false,contact:true}},
   custom:{sections:[]}
 };
 function deepClone(x){ return JSON.parse(JSON.stringify(x)); }
@@ -267,16 +267,93 @@ async function loadFromDb(){
 /* =====================================================================
    SAVE / RELOAD / IMPORT / EXPORT
 ===================================================================== */
+/* the baked-content marker inside index.html.
+   Found by scanning braces (never by `[^;]*`): project code stored in the JSON
+   contains `;` characters — a regex that stops at the first one truncates the
+   content and leaves dead junk behind on the same line. */
+function findBaked(html){
+  const i = html.indexOf('window.__BAKED_CONTENT__');
+  if(i < 0) return null;
+  const s = html.indexOf('{', i);
+  if(s < 0) return null;
+  let depth = 0, inStr = false, q = '', esc = false;
+  for(let k = s; k < html.length; k++){
+    const c = html[k];
+    if(inStr){
+      if(esc){ esc = false; continue; }
+      if(c === '\\'){ esc = true; continue; }
+      if(c === q){ inStr = false; }
+      continue;
+    }
+    if(c === '"' || c === "'"){ inStr = true; q = c; continue; }
+    if(c === '{'){ depth++; }
+    else if(c === '}'){ depth--; if(depth === 0) return { start: i, open: s, end: k + 1, src: html.slice(s, k + 1) }; }
+  }
+  return null;
+}
+function bakeLine(){
+  const payload = deepClone(CONTENT); delete payload.__empty;
+  return 'window.__BAKED_CONTENT__ = ' + JSON.stringify(payload).replace(/</g, '\\u003c') + ';';
+}
+function bakeInto(html, line){
+  const f = findBaked(html);
+  if(!f) return html.replace('const STORE_KEY', line + '\nconst STORE_KEY');
+  let after = f.end;
+  if(html[after] === ';') after++;
+  const nl = html.indexOf('\n', after);
+  const rest = (nl === -1) ? html.slice(after) : html.slice(after, nl);
+  if(rest.trim()) after = (nl === -1 ? html.length : nl);   /* drop leftover junk on that line */
+  return html.slice(0, f.start) + line + html.slice(after);
+}
+/* same bake as server.py, but client side → downloads a ready-to-upload index.html */
+async function bakeIndexHtml(){
+  try{
+    const res = await fetch('index.html', { cache: 'no-store' });
+    if(!res.ok) throw new Error('HTTP ' + res.status);
+    const html = await res.text();
+    const out = bakeInto(html, bakeLine());
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([out], { type: 'text/html;charset=utf-8' }));
+    a.download = 'index.html';
+    document.body.appendChild(a); a.click();
+    setTimeout(()=>{ a.remove(); URL.revokeObjectURL(a.href); }, 5000);
+    flash('Downloaded index.html ✓ — ارفعه مكان القديم على الاستضافة');
+  }catch(e){ flash('Export failed: ' + e.message, 'err'); }
+}
+/* is site running from server.py? then /api/save writes straight into index.html */
+let LOCAL_SERVER = null;
+async function localServer(){
+  if(LOCAL_SERVER !== null) return LOCAL_SERVER;
+  try{
+    const r = await fetch('api/ping', { cache: 'no-store' });
+    const j = await r.json();
+    LOCAL_SERVER = !!(j && j.ok);
+  }catch(e){ LOCAL_SERVER = false; }
+  return LOCAL_SERVER;
+}
+async function saveToLocalServer(payload){
+  try{
+    const r = await fetch('api/save', { method:'POST', headers:{ 'Content-Type':'application/json' }, body: JSON.stringify(payload) });
+    const j = await r.json().catch(()=>({ ok:false }));
+    return !!(j && j.ok);
+  }catch(e){ return false; }
+}
+
 async function doSave(){
   const btn = document.getElementById('saveBtn'); btn.disabled = true; btn.textContent = 'Saving…';
   try{
     const payload = deepClone(CONTENT); delete payload.__empty;
     const ts = await sbRpc('save_portfolio', { p_password: PASSWORD, p_content: payload });
     lastSaved = ts; CONTENT.__empty = false; markClean();
+    /* keep index.html itself in sync when running through server.py */
+    if(await localServer()) await saveToLocalServer(payload);
     flash('Saved to Supabase ✓ — live on the site');
     const fr = document.getElementById('previewFrame'); if(fr) fr.contentWindow.location.reload();
   }catch(e){
     if(/WRONG_PASSWORD/.test(e.message)){ flash('Session expired — please log in again', 'err'); doLogout(); }
+    else if(await localServer() && await saveToLocalServer(deepClone(CONTENT))){
+      flash('Supabase failed (' + e.message + ') — saved into index.html instead ✓', 'err');
+    }
     else flash('Save failed: ' + e.message, 'err');
   }
   btn.disabled = false; btn.textContent = '💾 Save to Supabase';
@@ -291,9 +368,9 @@ function doLogout(){ PASSWORD = ''; sessionStorage.removeItem(SESSION_KEY); loca
 async function importFromSite(){
   try{
     const html = await (await fetch('index.html', { cache: 'no-store' })).text();
-    const m = html.match(/window\.__BAKED_CONTENT__\s*=\s*(\{[\s\S]*?\});\s*\n/);
-    if(!m) throw new Error('No baked content found in index.html');
-    const baked = (new Function('return ' + m[1]))();
+    const f = findBaked(html);
+    if(!f) throw new Error('No baked content found in index.html');
+    const baked = (new Function('return ' + f.src))();
     /* also grab default avatar + gallery images if the baked content lacks them */
     const av = html.match(/const AVATAR = "(data:[^"]+)"/);
     CONTENT = deepMerge(deepClone(EMPTY_CONTENT), baked);
@@ -416,8 +493,8 @@ R.hero = function(){
             '<button class="mini danger" data-act="cv-del">Remove</button></div>'
         : '<p style="color:var(--muted);font-size:13px;margin-bottom:10px">No CV uploaded yet. Add your PDF or Word file below and visitors can download it from the site.</p>'+
           '<button class="mini" data-act="cv-upload">⬆ Upload CV (PDF / Word)</button>')+
-      '<label class="switch-row" style="margin-top:12px"><input type="checkbox" data-bool="cv.visible"'+(cv.visible!==false?' checked':'')+'><span>Show “Download CV” button on the site (hero section)</span></label>'+
-      '<div class="hint" style="margin-top:8px">Stored in the database (max 2.5 MB). After uploading, click <b>Save to Supabase</b>.</div></div>'+
+      '<label class="switch-row" style="margin-top:12px"><input type="checkbox" data-bool="cv.visible"'+(cv.visible!==false?' checked':'')+'><span>Show the “Download CV” button on the site (navbar + hero)</span></label>'+
+      '<div class="hint" style="margin-top:8px">الملف المرفوع هنا بياخد الأولوية على أي لينك CV في تبويب Settings، وبيظهر في زراير الناف بار و في زرار جديد جوه الهيرو. بعد الرفع دوس <b>Save to Supabase</b>.</div></div>'+
     '<div class="card"><h3>Brand<span class="line"></span></h3><div class="row">'+field('Name (navbar)','brand.name')+field('Tag (under name)','brand.tag')+'</div></div>'+
     '<div class="card"><h3>Hero text<span class="line"></span></h3>'+
       field('Pill (badge above name)','hero.pill')+
@@ -550,11 +627,19 @@ R.settings = function(){
   const keys = ['about','education','experience','services','skills','projects','certifications','testimonials','contact'];
   return '<h2>Settings</h2><div class="desc">Appearance, visibility, password & backups.</div>'+
     '<div class="card"><h3>Appearance<span class="line"></span></h3>'+field('Accent color','settings.accent',{type:'select',options:ACCENT_OPTS})+'</div>'+
+    '<div class="card"><h3>CV link<span class="line"></span></h3>'+
+      '<div class="row">'+field('CV URL','settings.cvUrl',{ph:'Mena-Medhat-CV.pdf or https://drive.google.com/…'})+field('Button label','settings.cvLabel',{ph:'Download CV'})+'</div>'+
+      '<div class="hint">اختياري: لو رفعت CV من تبويب <b>Hero</b> بياخد الأولوية على اللينك ده. لو اللينك فاضي بيستخدم الملف الافتراضي <code>Mena-Medhat-CV.pdf</code>. تقدر تخفي الزرار كله من تبويب Hero.</div></div>'+
+    '<div class="card"><h3>Tracking &amp; integrations<span class="line"></span></h3>'+
+      '<div class="row">'+field('Google Analytics 4 ID','settings.gtagId',{ph:'G-XXXXXXXXXX'})+field('Meta Pixel ID','settings.metaPixelId',{ph:'123456789012345'})+'</div>'+
+      field('Web3Forms access key','settings.web3formsKey',{ph:'60002f5f-…',hint:'مفتاح فورم التواصل — الرسايل بتوصلك على الإيميل وتتخزن في Supabase'})+
+      '<div class="hint">سيبها فاضية لو مش مستخدمها. القيم دي بتترجّع تلقائيًا على <code>index.html</code> بعد الـ Save.</div></div>'+
     '<div class="card"><h3>Section visibility<span class="line"></span></h3>'+keys.map(k=>'<label class="switch-row"><input type="checkbox" data-bool="settings.sections.'+k+'"'+(sec[k]!==false?' checked':'')+'><span>'+k.charAt(0).toUpperCase()+k.slice(1)+'</span></label>').join('')+'</div>'+
     '<div class="card"><h3>Change password<span class="line"></span></h3><div class="row"><div class="f"><label>New password (min 4 chars)</label><input id="newPass" type="text"></div><div class="f"><label>Repeat</label><input id="newPass2" type="text"></div></div><button class="mini" data-act="change-pass">Change password</button><div class="hint">Stored hashed in Supabase (table portfolio_auth).</div></div>'+
     '<div class="card"><h3>Data<span class="line"></span></h3>'+
       '<p style="color:var(--muted);font-size:13px;margin-bottom:12px">Current content size: <b>'+fmtSize(contentSize())+'</b>'+(contentSize() > 4*1048576 ? ' — ⚠️ large; consider fewer/lighter images' : '')+'. Last saved: '+(lastSaved ? new Date(lastSaved).toLocaleString() : '—')+'</p>'+
-      '<div class="chip-row"><button class="mini" data-act="import">⬇ Import current site (index.html)</button><button class="mini" data-act="export">💾 Export JSON backup</button><button class="mini" data-act="restore">📂 Restore from JSON</button></div></div>';
+      '<div class="chip-row"><button class="mini" data-act="import">⬇ Import current site (index.html)</button><button class="mini" data-act="bake">📦 Download updated index.html</button><button class="mini" data-act="export">💾 Export JSON backup</button><button class="mini" data-act="restore">📂 Restore from JSON</button></div>'+
+      '<div class="hint" style="margin-top:10px">على GitHub Pages / Netlify مفيش سيرفر يكتب في الملفات: بعد أي تعديل دوس <b>📦 Download updated index.html</b> وارفع الملف مكان القديم — كده محتوى الداشبورد يتطابق مع صفحة العرض للأبد.</div></div>';
 };
 R.preview = function(){
   const src = 'index.html?preview=' + Date.now();
@@ -565,22 +650,25 @@ R.preview = function(){
 
 /* ---- 📊 Analytics ---- */
 const ANALYTICS_SNIPPET = [
-  "/* 1) load supabase-config.js first, then paste ONCE into your live site */",
+  "/* ✅ index.html already does all of this — nothing to paste for this site.",
+  "   It is here for reference / if you build another page on the same database. */",
   "var SB = { url: window.SUPABASE_URL, key: window.SUPABASE_ANON_KEY };",
-  "var VID = localStorage.getItem('mm_visitor');",
-  "if(!VID){ VID = 'v' + Date.now().toString(36) + Math.random().toString(36).slice(2); localStorage.setItem('mm_visitor', VID); }",
-  "function mmTrack(type, projectId){",
+  "var VID = localStorage.getItem('mm_vid');",
+  "if(!VID){ VID = 'v' + Date.now().toString(36) + Math.random().toString(36).slice(2); localStorage.setItem('mm_vid', VID); }",
+  "function mmTrack(event, meta){",
   "  fetch(SB.url + '/rest/v1/portfolio_events', {",
   "    method: 'POST',",
   "    headers: { 'apikey': SB.key, 'Authorization': 'Bearer ' + SB.key, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },",
-  "    body: JSON.stringify({ event_type: type, project_id: projectId || null, visitor_id: VID })",
+  "    body: JSON.stringify({ event: event, meta: meta || {}, visitor_id: VID, path: location.pathname })",
   "  }).catch(function(){});",
   "}",
-  "mmTrack('view');                                   // once, per page load",
-  "// project card click → mmTrack('project_view', 'Project title')",
-  "// CV download button → mmTrack('cv_download')",
-  "// GitHub button      → mmTrack('github_click')",
-  "// LinkedIn button    → mmTrack('linkedin_click')"
+  "mmTrack('view');                                            // once per page load",
+  "mmTrack('project_view',  { project: 'Fire Fighting Car' }); // project card click",
+  "mmTrack('cv_download',   { location: 'nav_desktop' });      // CV button",
+  "mmTrack('github_click',  { url: 'https://github.com/…' });  // GitHub button",
+  "mmTrack('linkedin_click',{ url: 'https://linkedin.com/…' });",
+  "mmTrack('contact_submit',{ email: 'visitor@mail.com' });",
+  "/* event names above are exactly the ones this dashboard counts. */"
 ].join('\n');
 
 R.analytics = function(){
@@ -768,6 +856,7 @@ main.addEventListener('click', async e => {
       arr(path).push({ name: u.replace(/^https?:\/\//,'').slice(0,60), url: u }); markDirty(); renderTab(currentTab); return; }
   if(act === 'import'){ if(!CONTENT.__empty && !confirm('This replaces your current edits with the content baked in index.html. Continue?')) return; importFromSite(); return; }
   if(act === 'export'){ exportJson(); return; }
+  if(act === 'bake'){ bakeIndexHtml(); return; }
   if(act === 'restore'){ pickFile('application/json', async f => { try{ const j = JSON.parse(await f.text()); CONTENT = deepMerge(deepClone(EMPTY_CONTENT), j); CONTENT.__empty = false; markDirty(); renderTab(currentTab); flash('Restored — click Save'); }catch(err){ flash('Invalid JSON', 'err'); } }); return; }
   if(act === 'change-pass'){
     const a = document.getElementById('newPass').value, c = document.getElementById('newPass2').value;

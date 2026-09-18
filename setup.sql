@@ -127,4 +127,87 @@ grant select, insert on public.portfolio_events   to anon, authenticated;
 grant select, insert on public.portfolio_messages to anon, authenticated;
 grant usage, select on all sequences in schema public to anon, authenticated;
 
+-- =====================================================================
+--  ADDITION (v2) — Analytics + Messages
+--  مطلوبة لتبويبَي Analytics و Messages في dashboard.html
+--  (آمن إنك تشغّلها أكتر من مرة)
+-- =====================================================================
+
+-- 1) حالة الرسالة (new / read / replied)
+alter table public.portfolio_messages add column if not exists status text not null default 'new';
+create index if not exists portfolio_messages_created_idx on public.portfolio_messages (created_at desc);
+create index if not exists portfolio_events_created_idx   on public.portfolio_events   (created_at desc);
+
+-- 2) RPC الإحصائيات اللي الداشبورد بيقراها
+create or replace function public.get_analytics(p_days int default 30)
+returns jsonb
+language sql
+security definer
+set search_path = public
+as $$
+  with bounds as (
+    select date_trunc('day', now() - (coalesce(p_days, 30) || ' days')::interval) as since
+  ),
+  ev as (
+    select e.* from public.portfolio_events e, bounds b where e.created_at >= b.since
+  ),
+  totals as (
+    select jsonb_build_object(
+      'view',           count(*) filter (where event = 'view'),
+      'project_view',   count(*) filter (where event = 'project_view'),
+      'cv_download',    count(*) filter (where event in ('cv_download', 'download_cv')),
+      'github_click',   count(*) filter (where event = 'github_click'),
+      'linkedin_click', count(*) filter (where event = 'linkedin_click'),
+      'contact_submit', count(*) filter (where event in ('contact_submit', 'generate_lead'))
+    ) as j
+    from ev
+  ),
+  daily as (
+    select coalesce(
+      (select jsonb_agg(x order by x.date) from (
+         select to_char(d.day, 'YYYY-MM-DD')  as date,
+                count(distinct e.visitor_id)  as visitors,
+                count(e.id)                   as events
+         from generate_series((select since from bounds), date_trunc('day', now()), interval '1 day') d(day)
+         left join ev e on date_trunc('day', e.created_at) = d.day
+         group by d.day
+       ) x), '[]'::jsonb) as j
+  ),
+  top as (
+    select coalesce(
+      (select jsonb_build_object('id', coalesce(meta->>'project', meta->>'title', 'unknown'), 'views', count(*))
+         from ev where event = 'project_view'
+        group by 1 order by count(*) desc limit 1),
+      'null'::jsonb) as j
+  )
+  select jsonb_build_object(
+    'days',        coalesce(p_days, 30),
+    'totals',      (select j from totals),
+    'daily',       (select j from daily),
+    'top_project', (select j from top)
+  );
+$$;
+
+-- 3) تعليم الرسالة (جديدة / مقروءة / تم الرد) — محمية بالباسورد
+create or replace function public.update_message(p_password text, p_id bigint, p_status text)
+returns boolean
+language plpgsql
+security definer
+set search_path = public, extensions
+as $$
+declare ok boolean;
+begin
+  if not public.check_password(p_password) then
+    raise exception 'WRONG_PASSWORD';
+  end if;
+  if p_status not in ('new', 'read', 'replied') then
+    raise exception 'BAD_STATUS';
+  end if;
+  update public.portfolio_messages set status = p_status where id = p_id returning true into ok;
+  return coalesce(ok, false);
+end $$;
+
+grant execute on function public.get_analytics(int)                 to anon, authenticated;
+grant execute on function public.update_message(text, bigint, text) to anon, authenticated;
+
 -- Done ✓  Now open dashboard.html → login → "Import current site" → Save.

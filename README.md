@@ -42,6 +42,10 @@
    - ➕ **Add Anything**: أقسام مخصصة بأي محتوى
    - 🎨 اختيار لون الموقع
    - 👁️ معاينة حية + 📱 معاينة موبايل
+   - 📄 **CV**: ارفع ملف PDF/Word من تبويب Hero (بيظهر في زراير الناف بار + زرار في الهيرو) أو حط لينك خارجي من Settings
+   - ⚙️ **Settings**: لون الموقع + إظهار الأقسام + لينك/اسم زرار الـ CV + Web3Forms + Google Analytics + Meta Pixel
+   - 📦 **Download updated index.html**: ينزّل نسخة من `index.html` بالمحتوى الجديد جوه — ارفعها على أي استضافة ثابتة
+   - 📊 Analytics (مشاهدات/نقرات) + ✉️ Messages (رسايل الفورم)
 
 ---
 
@@ -67,8 +71,19 @@ python3 server.py
 
 (أو اسحب الملفات على [Netlify Drop](https://app.netlify.com/drop))
 
+### 🗄️ إعداد قاعدة البيانات (مرة واحدة)
+
+افتح Supabase → **SQL Editor → New query** وشغّل ملف `setup.sql` كامل.
+الملف فيه كل حاجة: جدول المحتوى، الباسورد (مهشّر)، سياسات الأمان،
+جدول الأحداث (Analytics)، جدول الرسايل، وRPCs:
+`check_password` / `save_portfolio` / `change_password` / `get_analytics` / `update_message`.
+
+> لو شغّلت `setup.sql` قبل كده، شغّل **بس** الجزء الأخير منه
+> (ADDITION v2 — Analytics + Messages) عشان تبويبَي Analytics و Messages يشتغلوا.
+
 > ⚠️ على الاستضافات الثابتة (GitHub Pages / Netlify) مفيش سيرفر يكتب في الملفات.
-> بعد أي تعديل من الداشبورد دوس **📦 Download updated site** واستبدل `index.html` في GitHub.
+> بعد أي تعديل من الداشبورد: **Settings → Data → 📦 Download updated index.html**
+> واستبدل بيه `index.html` في GitHub — كده المحتوى يتطابق مع الداشبورد حتى لو Supabase مش متاح.
 
 > 💡 غيّر الرابط في `sitemap.xml` و `robots.txt` لرابطك الفعلي بعد النشر.
 
