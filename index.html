@@ -721,7 +721,9 @@ function loadContent(){
 
 /* =====================================================================
    SUPABASE — the live content source (edited from dashboard.html)
-   Table: public.portfolio  (id='main', content jsonb)
+   The `portfolio` endpoint is a VIEW that assembles one JSON out of the
+   organized tables (site_content, site_projects, site_skills, …) —
+   see SUPABASE.md and setup.sql for the full map.
 ===================================================================== */
 const SB_CACHE_KEY = "mm_sb_content_cache";
 function sbReady(){ return !!(window.SUPABASE_URL && window.SUPABASE_ANON_KEY); }
