@@ -87,6 +87,26 @@ main h2{font-size:22px;margin-bottom:6px}
 .banner{background:rgba(251,191,36,.1);border:1px solid rgba(251,191,36,.35);color:var(--warn);padding:12px 14px;border-radius:12px;font-size:13px;margin-bottom:18px}
 code{font-family:var(--mono);background:rgba(148,163,184,.12);padding:2px 6px;border-radius:6px;font-size:12px}
 kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);padding:1px 5px;border-radius:5px;color:var(--muted)}
+/* analytics + messages */
+.stat{background:var(--panel2);border:1px solid var(--line);border-radius:14px;padding:14px 16px}
+.stat .l{font-size:12px;color:var(--muted)}
+.stat .n{display:block;font-size:26px;font-weight:800;margin-top:2px}
+.chart{display:flex;align-items:flex-end;gap:3px;height:170px;margin-top:10px}
+.chart-col{flex:1;min-width:0;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;height:100%;gap:4px}
+.chart-bar{width:100%;max-width:20px;border-radius:4px 4px 0 0;background:linear-gradient(180deg,var(--acc),var(--acc2));min-height:2px}
+.chart-lbl{font-size:9px;color:var(--muted);height:11px;white-space:nowrap}
+.badge{display:inline-block;font-size:10.5px;font-weight:700;padding:2.5px 9px;border-radius:999px;border:1px solid var(--line);color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.badge.new{color:var(--acc);border-color:rgba(56,189,248,.4);background:rgba(56,189,248,.1)}
+.badge.replied{color:var(--ok);border-color:rgba(52,211,153,.4);background:rgba(52,211,153,.1)}
+.msg{border:1px solid var(--line);border-radius:14px;padding:14px 16px;margin-bottom:12px;background:rgba(15,23,42,.5)}
+.msg.unread{border-left:3px solid var(--acc)}
+.msg-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px}
+.msg-head b{font-size:13.5px}
+.msg-head .em{color:var(--muted);font-size:12.5px;word-break:break-all}
+.msg-head time{margin-left:auto;color:var(--muted);font-size:12px;white-space:nowrap}
+.msg-text{font-size:13.5px;white-space:pre-wrap;word-break:break-word}
+.msg-actions{margin-top:10px;display:flex;gap:8px;flex-wrap:wrap}
+pre.snip{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px 14px;font-family:var(--mono);font-size:12px;line-height:1.55;overflow-x:auto;margin-top:8px}
 </style>
 </head>
 <body>
@@ -162,6 +182,7 @@ let lastSaved = null;
 const EMPTY_CONTENT = {
   brand:{name:'',tag:''},
   hero:{pill:'',hello:"Hi, I'm",name:'',typePrefix:'',typeWords:[],lead:'',tags:[],stats:[]},
+  cv:{name:'',data:'',visible:true},
   about:{eyebrow:'About Me',title:'',sub:'',cards:[]},
   education:{eyebrow:'Education',title:'Academic Background',items:[]},
   experience:{eyebrow:'Experience',title:"Where I've Applied It",items:[]},
@@ -172,7 +193,7 @@ const EMPTY_CONTENT = {
   testimonials:{eyebrow:'Testimonials',title:'What People Say',sub:'',items:[]},
   contact:{eyebrow:'Contact',title:"Let's Build Something",sub:'',email:'',phone:'',phoneDisplay:'',linkedin:'',linkedinUrl:'',github:'',githubUrl:'',location:''},
   footer:{line1:'',line2:''},
-  settings:{accent:'cyan',gtagId:'',metaPixelId:'',web3formsKey:'60002f5f-73bc-4bcb-aef9-9dbddf2ebec8',cvUrl:'Mena-Medhat-CV.pdf',cvLabel:'Download CV',sections:{about:true,education:true,experience:true,services:true,skills:true,projects:true,certifications:true,testimonials:false,contact:true}},
+  settings:{accent:'cyan',sections:{about:true,education:true,experience:true,services:true,skills:true,projects:true,certifications:true,testimonials:false,contact:true}},
   custom:{sections:[]}
 };
 function deepClone(x){ return JSON.parse(JSON.stringify(x)); }
@@ -306,6 +327,18 @@ function compressImage(file, maxW, quality){
 }
 function readAsDataURL(file){ return new Promise((res, rej)=>{ const r = new FileReader(); r.onload = ()=> res(r.result); r.onerror = rej; r.readAsDataURL(file); }); }
 const MAX_ATTACH = 2.5 * 1024 * 1024;
+/* base64 → real Blob URL (for opening/downloading the stored CV) */
+function cvBlobUrl(){
+  const cv = (CONTENT && CONTENT.cv) || {};
+  if(!cv.data || cv.data.indexOf('data:') !== 0) return '';
+  const m = cv.data.match(/^data:([^;,]+)[^,]*,/);
+  try{
+    const bin = atob(cv.data.split(',')[1] || ''); const bytes = new Uint8Array(bin.length);
+    for(let i=0;i<bin.length;i++) bytes[i] = bin.charCodeAt(i);
+    return URL.createObjectURL(new Blob([bytes], { type: m ? m[1] : 'application/octet-stream' }));
+  }catch(e){ return ''; }
+}
+const CV_ACCEPT = '.pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 
 /* =====================================================================
    UI BUILDING BLOCKS
@@ -360,6 +393,7 @@ const TABS = [
   ['hero','👤','Hero / Profile'],['about','ℹ️','About'],['education','🎓','Education'],['experience','💼','Experience'],
   ['services','🧰','Services'],['skills','🛠️','Skills'],['projects','🚀','Projects'],['certs','🏅','Certifications'],
   ['testimonials','💬','Testimonials'],['contact','📬','Contact'],['footer','📝','Footer'],['custom','➕','Add Anything'],
+  ['analytics','📊','Analytics'],['messages','✉️','Messages'],
   ['settings','⚙️','Settings'],['preview','👁️','Preview']
 ];
 function buildTabs(){ document.getElementById('tabs').innerHTML = TABS.map(t=>'<button class="tab" data-tab="'+t[0]+'"><span class="em">'+t[1]+'</span>'+t[2]+'</button>').join(''); }
@@ -367,11 +401,23 @@ function buildTabs(){ document.getElementById('tabs').innerHTML = TABS.map(t=>'<
 const R = {};
 R.hero = function(){
   const av = CONTENT.hero.avatar || '';
+  const cv = CONTENT.cv || {};
   return '<h2>Hero / Profile</h2><div class="desc">The first thing visitors see.</div>'+
     (CONTENT.__empty ? '<div class="banner">The database is still empty. Click <b>Import current site</b> to pull everything from index.html, then Save. &nbsp;<button class="mini" data-act="import">⬇ Import current site</button></div>' : '')+
     '<div class="card"><h3>Photo<span class="line"></span></h3><div style="display:flex;gap:18px;align-items:center;flex-wrap:wrap">'+
       (av ? '<img class="avatar" src="'+av+'">' : '<div class="avatar" style="display:grid;place-items:center;color:var(--muted)">No photo</div>')+
       '<div><button class="mini" data-act="photo">⬆ Upload photo</button> <button class="mini danger" data-act="photo-del">Remove</button><div class="hint">Auto-resized to 600px and stored in the database.</div></div></div></div>'+
+    '<div class="card"><h3>📄 CV / Resume<span class="line"></span></h3>'+
+      (cv.data
+        ? '<div class="att"><span>📄 '+esc(cv.name || 'CV')+'</span><small>'+fmtSize(cv.data.length*0.75)+'</small>'+
+            '<button class="mini" data-act="cv-download">⬇ Download</button>'+
+            '<button class="mini" data-act="cv-preview">👁 Preview</button>'+
+            '<button class="mini" data-act="cv-upload">⬆ Replace</button>'+
+            '<button class="mini danger" data-act="cv-del">Remove</button></div>'
+        : '<p style="color:var(--muted);font-size:13px;margin-bottom:10px">No CV uploaded yet. Add your PDF or Word file below and visitors can download it from the site.</p>'+
+          '<button class="mini" data-act="cv-upload">⬆ Upload CV (PDF / Word)</button>')+
+      '<label class="switch-row" style="margin-top:12px"><input type="checkbox" data-bool="cv.visible"'+(cv.visible!==false?' checked':'')+'><span>Show “Download CV” button on the site (hero section)</span></label>'+
+      '<div class="hint" style="margin-top:8px">Stored in the database (max 2.5 MB). After uploading, click <b>Save to Supabase</b>.</div></div>'+
     '<div class="card"><h3>Brand<span class="line"></span></h3><div class="row">'+field('Name (navbar)','brand.name')+field('Tag (under name)','brand.tag')+'</div></div>'+
     '<div class="card"><h3>Hero text<span class="line"></span></h3>'+
       field('Pill (badge above name)','hero.pill')+
@@ -502,11 +548,8 @@ R.custom = function(){
 R.settings = function(){
   const sec = CONTENT.settings.sections || {};
   const keys = ['about','education','experience','services','skills','projects','certifications','testimonials','contact'];
-  return '<h2>Settings</h2><div class="desc">Appearance, visibility,Tracking, CV & password.</div>'+
+  return '<h2>Settings</h2><div class="desc">Appearance, visibility, password & backups.</div>'+
     '<div class="card"><h3>Appearance<span class="line"></span></h3>'+field('Accent color','settings.accent',{type:'select',options:ACCENT_OPTS})+'</div>'+
-    '<div class="card"><h3>📊 Tracking (optional)<span class="line"></span></h3>'+field('Google tag — G-XXXXXXX','settings.gtagId',{ph:'G-XXXXXXX',hint:'Paste your GA4 Measurement ID. Leave empty to disable. Can also be set in supabase-config.js via GTAG_ID.'})+field('Meta Pixel ID','settings.metaPixelId',{ph:'123456789012345',hint:'Facebook Pixel ID. Leave empty to disable. Also settable via META_PIXEL_ID.'})+'</div>'+
-    '<div class="card"><h3>✉️ Contact form<span class="line"></span></h3>'+field('Web3Forms Access Key','settings.web3formsKey',{ph:'60002f5f-...',hint:'From https://web3forms.com — the inbox that receives portfolio messages. Also settable via WEB3FORMS_ACCESS_KEY.'})+'</div>'+
-    '<div class="card"><h3>📄 CV button<span class="line"></span></h3>'+field('CV URL / file path','settings.cvUrl',{ph:'Mena-Medhat-CV.pdf or https://…',hint:'File in repo or full URL (Drive/Dropbox). Leave empty to hide?' })+field('CV button label','settings.cvLabel',{ph:'Download CV'})+'</div>'+
     '<div class="card"><h3>Section visibility<span class="line"></span></h3>'+keys.map(k=>'<label class="switch-row"><input type="checkbox" data-bool="settings.sections.'+k+'"'+(sec[k]!==false?' checked':'')+'><span>'+k.charAt(0).toUpperCase()+k.slice(1)+'</span></label>').join('')+'</div>'+
     '<div class="card"><h3>Change password<span class="line"></span></h3><div class="row"><div class="f"><label>New password (min 4 chars)</label><input id="newPass" type="text"></div><div class="f"><label>Repeat</label><input id="newPass2" type="text"></div></div><button class="mini" data-act="change-pass">Change password</button><div class="hint">Stored hashed in Supabase (table portfolio_auth).</div></div>'+
     '<div class="card"><h3>Data<span class="line"></span></h3>'+
@@ -520,12 +563,149 @@ R.preview = function(){
     '<iframe class="preview-frame" id="previewFrame" src="'+src+'"></iframe>';
 };
 
+/* ---- 📊 Analytics ---- */
+const ANALYTICS_SNIPPET = [
+  "/* 1) load supabase-config.js first, then paste ONCE into your live site */",
+  "var SB = { url: window.SUPABASE_URL, key: window.SUPABASE_ANON_KEY };",
+  "var VID = localStorage.getItem('mm_visitor');",
+  "if(!VID){ VID = 'v' + Date.now().toString(36) + Math.random().toString(36).slice(2); localStorage.setItem('mm_visitor', VID); }",
+  "function mmTrack(type, projectId){",
+  "  fetch(SB.url + '/rest/v1/portfolio_events', {",
+  "    method: 'POST',",
+  "    headers: { 'apikey': SB.key, 'Authorization': 'Bearer ' + SB.key, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },",
+  "    body: JSON.stringify({ event_type: type, project_id: projectId || null, visitor_id: VID })",
+  "  }).catch(function(){});",
+  "}",
+  "mmTrack('view');                                   // once, per page load",
+  "// project card click → mmTrack('project_view', 'Project title')",
+  "// CV download button → mmTrack('cv_download')",
+  "// GitHub button      → mmTrack('github_click')",
+  "// LinkedIn button    → mmTrack('linkedin_click')"
+].join('\n');
+
+R.analytics = function(){
+  return '<h2>Analytics</h2><div class="desc">Views, clicks & visitors — reported by the live site, stored in Supabase.</div>'+
+    '<div class="chip-row" style="margin-bottom:14px"><button class="mini" data-act="analytics-refresh">↻ Refresh</button></div>'+
+    '<div class="card" id="analyticsBody"><p style="color:var(--muted)">Loading analytics…</p></div>'+
+    '<div class="card"><h3>Site wiring<span class="line"></span></h3>'+
+    '<p style="color:var(--muted);font-size:13px">Paste this once into your live site and it starts reporting here automatically:</p>'+
+    '<pre class="snip">'+esc(ANALYTICS_SNIPPET)+'</pre></div>';
+};
+
+async function loadAnalytics(){
+  const box = document.getElementById('analyticsBody'); if(!box) return;
+  box.innerHTML = '<p style="color:var(--muted)">Loading…</p>';
+  let d;
+  try{ d = await sbRpc('get_analytics', { p_days: 30 }); }
+  catch(e){
+    box.innerHTML = '<div class="banner">⚠️ ' + esc(e.message) + '<br>Run the <b>“ADDITION (v2) — Analytics + Messages”</b> section of <code>setup.sql</code> in Supabase → SQL Editor, then press Refresh.</div>';
+    return;
+  }
+  const t = d.totals || {};
+  /* keys match the event_type values the site sends (see setup.sql) */
+  const cards = [
+    ['👀 Portfolio views', t.view],
+    ['🚀 Project views', t.project_view],
+    ['📄 CV downloads', t.cv_download],
+    ['🐙 GitHub clicks', t.github_click],
+    ['💼 LinkedIn clicks', t.linkedin_click]
+  ];
+  const daily = d.daily || [];
+  const top = d.top_project;
+  const maxV = Math.max(1, daily.reduce((m,x)=> Math.max(m, x.visitors||0), 0));
+  const bars = daily.map((x,i)=>{
+    const v = x.visitors||0, h = Math.round(100 * v / maxV);
+    return '<div class="chart-col" title="'+esc(x.date)+' — '+v+' visitor(s), '+(x.events||0)+' event(s)">'+
+      '<div class="chart-bar" style="height:'+Math.max(2,h)+'%"></div>'+
+      '<span class="chart-lbl">'+(i % 5 === 0 || i === daily.length-1 ? String(x.date).slice(5) : '')+'</span></div>';
+  }).join('');
+  const totVis = daily.reduce((s,x)=> s+(x.visitors||0),0), totEv = daily.reduce((s,x)=> s+(x.events||0),0);
+  box.innerHTML =
+    '<div class="row3" style="margin-bottom:14px">'+cards.map(c=>'<div class="stat"><span class="l">'+c[0]+'</span><span class="n">'+(c[1]||0)+'</span></div>').join('')+'</div>'+
+    '<div style="background:var(--panel2);border:1px solid var(--line);border-radius:14px;padding:14px 16px;margin-bottom:14px;font-size:13.5px">'+
+      '🏆 <b>Most viewed project:</b> ' + (top ? esc(top.id) + ' <span style="color:var(--muted);font-size:12.5px">(' + top.views + ' views)</span>' : '<span style="color:var(--muted)">no project views yet</span>') +
+    '</div>'+
+    '<div class="row3" style="margin-bottom:18px">'+
+      '<div class="stat"><span class="l">Visitors (last ' + (d.days||30) + ' days)</span><span class="n">' + totVis + '</span></div>'+
+      '<div class="stat"><span class="l">Total events (last ' + (d.days||30) + ' days)</span><span class="n">' + totEv + '</span></div>'+
+    '</div>'+
+    '<h3 style="font-size:14px;text-transform:uppercase;letter-spacing:.08em;color:var(--acc);margin-bottom:4px">Visitors over time <span style="color:var(--muted);font-size:11.5px;text-transform:none;letter-spacing:0">(last ' + (d.days||30) + ' days, per day)</span></h3>'+
+    (daily.length && totVis > 0 ? '<div class="chart">' + bars + '</div>' : '<p style="color:var(--muted);font-size:13px;padding:14px 0">No visits recorded yet — once the snippet above is on your live site, the chart fills in daily.</p>');
+}
+
+/* ---- ✉️ Messages / Contact ---- */
+const CONTACT_SNIPPET = [
+  "/* your site's contact form — submit handler (uses SB + nameEl/emailEl/msgEl inputs) */",
+  "form.addEventListener('submit', function(ev){",
+  "  ev.preventDefault();",
+  "  fetch(SB.url + '/rest/v1/portfolio_messages', {",
+  "    method: 'POST',",
+  "    headers: { 'apikey': SB.key, 'Authorization': 'Bearer ' + SB.key, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },",
+  "    body: JSON.stringify({ name: nameEl.value.trim(), email: emailEl.value.trim(), message: msgEl.value.trim() })",
+  "  }).then(function(r){ if(!r.ok) throw 0; showThanks(); form.reset(); })",
+  "    .catch(function(){ showError(); });",
+  "});"
+].join('\n');
+let msgFilter = 'all';
+
+R.messages = function(){
+  return '<h2>Messages</h2><div class="desc">Contact form submissions from the live site. Opening a new message marks it read.</div>'+
+    '<div id="messagesBody"><p style="color:var(--muted)">Loading messages…</p></div>'+
+    '<div class="card" style="margin-top:18px"><h3>Site wiring<span class="line"></span></h3>'+
+    '<p style="color:var(--muted);font-size:13px">Your site\'s contact form should post <b>name / email / message</b> like this (uses <code>SB</code> from the Analytics wiring above):</p>'+
+    '<pre class="snip">'+esc(CONTACT_SNIPPET)+'</pre></div>';
+};
+
+async function loadMessages(){
+  const box = document.getElementById('messagesBody'); if(!box) return;
+  box.innerHTML = '<p style="color:var(--muted)">Loading…</p>';
+  let rows;
+  try{
+    const r = await fetch(SB_URL + '/rest/v1/portfolio_messages?select=id,name,email,message,status,created_at&order=created_at.desc&limit=200', { headers: sbHeaders(), cache: 'no-store' });
+    if(!r.ok){
+      let msg = 'HTTP ' + r.status;
+      try{ const j = await r.json(); if(j && j.message) msg = j.message; }catch(e){}
+      throw new Error(msg + ' — run the “ADDITION (v2)” section of setup.sql in Supabase → SQL Editor first.');
+    }
+    rows = await r.json();
+  }catch(e){
+    box.innerHTML = '<div class="banner">⚠️ ' + esc(e.message) + '</div>';
+    return;
+  }
+  const counts = { all: rows.length, new: 0, read: 0, replied: 0 };
+  rows.forEach(m => { if(counts[m.status] !== undefined) counts[m.status]++; });
+  const shown = msgFilter === 'all' ? rows : rows.filter(m => m.status === msgFilter);
+  box.innerHTML =
+    '<div class="chip-row" style="margin-bottom:14px">'+
+      ['all','new','read','replied'].map(f=>
+        '<button class="mini" data-act="msg-filter" data-filter="'+f+'"'+(msgFilter===f ? ' style="border-color:var(--acc);color:var(--acc)"' : '')+'>'+
+        f.charAt(0).toUpperCase()+f.slice(1)+' ('+counts[f]+')</button>').join('')+
+    '</div>'+
+    (shown.length ? shown.map(m=>{
+      const unread = m.status === 'new';
+      return '<div class="msg'+(unread?' unread':'')+'">'+
+        '<div class="msg-head"><b>'+esc(m.name)+'</b><span class="em">&lt;'+esc(m.email)+'&gt;</span>'+
+          '<span class="badge '+esc(m.status)+'">'+esc(m.status)+'</span>'+
+          '<time>'+new Date(m.created_at).toLocaleString()+'</time></div>'+
+        '<p class="msg-text"'+(unread ? ' data-act="msg-open" data-id="'+m.id+'" style="cursor:pointer" title="Click to mark as read"' : '')+'>'+esc(m.message)+'</p>'+
+        '<div class="msg-actions">'+
+          '<a class="mini" style="text-decoration:none" href="mailto:'+esc(m.email)+'">✉️ Reply by email</a>'+
+          (m.status !== 'read' ? '<button class="mini" data-act="msg-status" data-id="'+m.id+'" data-status="read">✓ Mark read</button>' : '')+
+          (m.status !== 'replied' ? '<button class="mini" data-act="msg-status" data-id="'+m.id+'" data-status="replied">↩ Mark replied</button>' : '')+
+          (m.status !== 'new' ? '<button class="mini" data-act="msg-status" data-id="'+m.id+'" data-status="new">↺ Back to new</button>' : '')+
+        '</div></div>';
+    }).join('')
+    : '<p style="color:var(--muted);font-size:13px">No messages '+(msgFilter==='all' ? 'yet — once your live site\'s contact form posts here they will appear in this list.' : 'with this status.')+'</p>');
+}
+
 function renderTab(tab){
   currentTab = tab;
   document.querySelectorAll('#tabs .tab').forEach(b=> b.classList.toggle('active', b.dataset.tab === tab));
   document.getElementById('main').innerHTML = R[tab] ? R[tab]() : '';
   window.scrollTo(0,0);
   if(tab === 'preview'){ const fr = document.getElementById('previewFrame'); fr.onload = pushPreview; }
+  if(tab === 'analytics') loadAnalytics();
+  if(tab === 'messages') loadMessages();
 }
 function pushPreview(){ const fr = document.getElementById('previewFrame'); if(fr && fr.contentWindow){ const c = deepClone(CONTENT); delete c.__empty; fr.contentWindow.postMessage({type:'mm-preview', content:c}, '*'); } }
 
@@ -564,6 +744,20 @@ main.addEventListener('click', async e => {
   if(act === 'chip-del'){ arr(path).splice(i,1); markDirty(); renderTab(currentTab); return; }
   if(act === 'photo'){ pickFile('image/*', async f => { CONTENT.hero.avatar = await compressImage(f, 600, .85); markDirty(); renderTab(currentTab); }); return; }
   if(act === 'photo-del'){ delete CONTENT.hero.avatar; markDirty(); renderTab(currentTab); return; }
+  if(act === 'cv-upload'){ pickFile(CV_ACCEPT, async f => {
+      if(f.size > MAX_ATTACH){ flash('CV too big (max 2.5 MB). Compress it, or host it on Google Drive and add a link instead.', 'err'); return; }
+      try{
+        const data = await readAsDataURL(f);
+        const prev = getPath(CONTENT, 'cv') || {};
+        setPath(CONTENT, 'cv', { name: f.name, data, visible: prev.visible !== false });
+        markDirty(); renderTab(currentTab); flash('CV added ✓ — now click Save to Supabase');
+      }catch(err){ flash('Could not read the file: ' + err.message, 'err'); }
+    }); return; }
+  if(act === 'cv-del'){ if(!confirm('Remove the CV?')) return; setPath(CONTENT, 'cv', { name:'', data:'', visible:true }); markDirty(); renderTab(currentTab); return; }
+  if(act === 'cv-download'){ const u = cvBlobUrl(); if(!u){ flash('No CV uploaded', 'err'); return; }
+      const a = document.createElement('a'); a.href = u; a.download = (CONTENT.cv && CONTENT.cv.name) || 'CV';
+      document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=> URL.revokeObjectURL(u), 30000); return; }
+  if(act === 'cv-preview'){ const u = cvBlobUrl(); if(!u){ flash('No CV uploaded', 'err'); return; } window.open(u, '_blank'); return; }
   if(act === 'img-add'){ pickFile('image/*', async f => { arr(path).push(await compressImage(f, 1200, .8)); markDirty(); renderTab(currentTab); }); return; }
   if(act === 'img-set'){ pickFile('image/*', async f => { setPath(CONTENT, path, await compressImage(f, 1400, .8)); markDirty(); renderTab(currentTab); }); return; }
   if(act === 'att-file'){ pickFile('*/*', async f => {
@@ -582,6 +776,25 @@ main.addEventListener('click', async e => {
     catch(err){ flash('Failed: ' + err.message, 'err'); } return; }
   if(act === 'pv-desktop' || act === 'pv-mobile'){ document.getElementById('previewFrame').classList.toggle('mobile', act === 'pv-mobile'); return; }
   if(act === 'pv-refresh'){ const fr = document.getElementById('previewFrame'); fr.src = 'index.html?preview=' + Date.now(); return; }
+  if(act === 'analytics-refresh'){ loadAnalytics(); return; }
+  if(act === 'msg-filter'){ msgFilter = b.dataset.filter; loadMessages(); return; }
+  if(act === 'msg-open'){
+    const id = +b.dataset.id;
+    try{ await sbRpc('update_message', { p_password: PASSWORD, p_id: id, p_status: 'read' }); loadMessages(); }
+    catch(e){ if(/WRONG_PASSWORD/.test(e.message)){ flash('Session expired — please log in again', 'err'); doLogout(); } }
+    return; }
+  if(act === 'msg-status'){
+    const id = +b.dataset.id, st = b.dataset.status;
+    b.disabled = true;
+    try{
+      const ok = await sbRpc('update_message', { p_password: PASSWORD, p_id: id, p_status: st });
+      if(ok === true) loadMessages(); else flash('Message not found', 'err');
+    }catch(e){
+      b.disabled = false;
+      if(/WRONG_PASSWORD/.test(e.message)){ flash('Session expired — please log in again', 'err'); doLogout(); }
+      else flash('Failed: ' + e.message, 'err');
+    }
+    return; }
 });
 </script>
 </body>
