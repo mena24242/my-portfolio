@@ -1,44 +1,43 @@
 -- =====================================================================
---  Mena Medhat Portfolio — Supabase setup (v3 — ORGANIZED DATA)
---  Run in:  Supabase Dashboard → SQL Editor → New query → Run
+--  Mena Medhat Portfolio - Supabase setup (v3: ORGANIZED DATA)
+--  Run in:  Supabase Dashboard -> SQL Editor -> New query -> Run
 --
---  ✅ آمن تشغّله في أي وقت (على مشروع جديد أو قديم) — معيد تشغيله بيتحقق
---     وينقل البيانات القديمة تلقائيًا دون أي فقدان.
+--  Safe to run at any time (fresh or existing project). Re-running it
+--  detects previous runs and migrates old data automatically with zero
+--  data loss (built-in verification, auto-rollback on any mismatch).
 --
---  ماذا يفعل هذا الإصدار؟
---  بدل أن يكون كل محتوى الموقع في خلية JSON واحدة ضخمة داخل جدول
---  `portfolio`، الآن البيانات متقسمة إلى جداول حقيقية واضحة تقدر تقرأها
---  وتعدّلها مباشرة من Supabase → Table Editor:
+--  What this version does:
+--  Instead of storing the whole portfolio as ONE huge JSON cell, the
+--  content now lives in clear, human-readable tables you can browse and
+--  edit directly from Supabase -> Table Editor:
 --
---    site_content         أقسام النصوص (الهيرو، عني، تواصل، الفوتر، الإعدادات…) صف لكل قسم
---    site_projects        المشاريع          — صف لكل مشروع بأعمدة واضحة
---    site_experience      الخبرات            — صف لكل خبرة
---    site_education       التعليم            — صف لكل مرحلة دراسية
---    site_services        الخدمات            — صف لكل خدمة
---    site_skills          مجموعات المهارات   — صف لكل مجموعة (chips[])
---    site_certifications  الشهادات           — صف لكل شهادة
---    site_testimonials    التوصيات           — صف لكل توصية
---    site_meta            وقت آخر حفظ
---    portfolio_auth       كلمة مرور الداشبورد (مشفّرة — غير مقروءة من API)
---    portfolio_events     تتبع الزوار (حدث لكل صف)
---    portfolio_messages   رسائل الفورم (رسالة لكل صف)
+--    site_content         text sections (brand, hero, about, contact, ...)
+--    site_projects        one row per project
+--    site_experience      one row per experience
+--    site_education       one row per education item
+--    site_services        one row per service
+--    site_skills          one row per skill group (chips[])
+--    site_certifications  one row per certificate
+--    site_testimonials    one row per recommendation
+--    site_meta            last-save time + existing sections
+--    portfolio_auth       dashboard password (hashed, never readable)
+--    portfolio_events     visitor analytics (one row per event)
+--    portfolio_messages   contact-form messages (one row per message)
 --
---  جدول العرض `portfolio` بقا VIEW بيركّب نفس شكل JSON القديم تلقائيًا،
---  لذلك index.html و dashboard.html شغالين بدون أي تغيير.
---  التعديل من الداشبورد أو من الجداول مباشرة — الاتنين يتزامنوا.
+--  `portfolio` is now a VIEW that rebuilds the exact same JSON shape as
+--  before, so index.html and dashboard.html keep working unchanged.
+--  Full documentation (Arabic): see SUPABASE.md
+--  NOTE: this file is intentionally pure ASCII (English comments only)
+--  so it can always be copy-pasted into the SQL Editor safely.
 -- =====================================================================
 
 create extension if not exists pgcrypto with schema extensions;
 
--- =====================================================================
---  PART A — Dashboard password (unchanged from v1/v2)
--- =====================================================================
 create table if not exists public.portfolio_auth (
   id            text primary key,
   password_hash text not null
 );
 
--- default password: 242006  (change it from the dashboard → Settings)
 insert into public.portfolio_auth (id, password_hash)
 values ('main', extensions.crypt('242006', extensions.gen_salt('bf')))
 on conflict (id) do nothing;
@@ -68,18 +67,12 @@ begin
   return true;
 end $$;
 
--- =====================================================================
---  PART B — ORGANIZED CONTENT TABLES
--- =====================================================================
-
--- نصوص الأقسام "المفردة" — صف واضح لكل قسم (بيتخزن كما هو بالظبط)
 create table if not exists public.site_content (
   key        text primary key,
   data       jsonb not null,
   updated_at timestamptz not null default now()
 );
 
--- وقت آخر حفظ + الأقسام الموجودة حاليًا
 create table if not exists public.site_meta (
   id         text primary key,
   updated_at timestamptz not null default now(),
@@ -87,9 +80,8 @@ create table if not exists public.site_meta (
 );
 alter table public.site_meta add column if not exists sections jsonb not null default '[]'::jsonb;
 
--- المشاريع — عمود لكل حاجة بتظهر في الموقع
 create table if not exists public.site_projects (
-  sort    int primary key,                 /* ترتيب الظهور في الموقع */
+  sort    int primary key,
   title   text not null default '',
   year    text not null default '',
   tag     text not null default '',
@@ -97,13 +89,12 @@ create table if not exists public.site_projects (
   visual  text not null default '',
   github  text not null default '',
   demo    text not null default '',
-  code    text not null default '',        /* كود المشروع (Arduino مثلاً) */
-  bullets text[] not null default '{}',    /* النقاط */
+  code    text not null default '',
+  bullets text[] not null default '{}',
   fields  jsonb not null default '[]'::jsonb,
-  extra   jsonb not null default '{}'::jsonb  /* أي حقول إضافية مش ضايعة */
+  extra   jsonb not null default '{}'::jsonb
 );
 
--- الخبرات
 create table if not exists public.site_experience (
   sort    int primary key,
   title   text not null default '',
@@ -114,7 +105,6 @@ create table if not exists public.site_experience (
   extra   jsonb not null default '{}'::jsonb
 );
 
--- التعليم
 create table if not exists public.site_education (
   sort    int primary key,
   title   text not null default '',
@@ -125,7 +115,6 @@ create table if not exists public.site_education (
   extra   jsonb not null default '{}'::jsonb
 );
 
--- الخدمات
 create table if not exists public.site_services (
   sort  int primary key,
   icon  text not null default '',
@@ -134,7 +123,6 @@ create table if not exists public.site_services (
   extra jsonb not null default '{}'::jsonb
 );
 
--- مجموعات المهارات (chips كمصفوفة نصوص واضحة)
 create table if not exists public.site_skills (
   sort  int primary key,
   icon  text not null default '',
@@ -143,7 +131,6 @@ create table if not exists public.site_skills (
   extra jsonb not null default '{}'::jsonb
 );
 
--- الشهادات
 create table if not exists public.site_certifications (
   sort   int primary key,
   code   text not null default '',
@@ -153,7 +140,6 @@ create table if not exists public.site_certifications (
   extra  jsonb not null default '{}'::jsonb
 );
 
--- التوصيات
 create table if not exists public.site_testimonials (
   sort  int primary key,
   name  text not null default '',
@@ -162,20 +148,16 @@ create table if not exists public.site_testimonials (
   extra jsonb not null default '{}'::jsonb
 );
 
--- وصف الجداول (يظهر في Supabase)
-comment on table public.site_content        is 'Portfolio text sections (brand, hero, about, contact, footer, settings, design, custom) — one clear row per section';
+comment on table public.site_content        is 'Portfolio text sections (brand, hero, about, contact, footer, settings, design, custom) - one clear row per section';
 comment on table public.site_meta           is 'Last time the portfolio content was saved';
-comment on table public.site_projects       is 'Projects — one row per project, ordered by sort';
-comment on table public.site_experience     is 'Experience — one row per item, ordered by sort';
-comment on table public.site_education      is 'Education — one row per item, ordered by sort';
-comment on table public.site_services       is 'Services — one row per service, ordered by sort';
-comment on table public.site_skills         is 'Skill groups — one row per group (chips = array of skills)';
-comment on table public.site_certifications is 'Certifications — one row per certificate';
-comment on table public.site_testimonials   is 'Testimonials — one row per recommendation';
+comment on table public.site_projects       is 'Projects - one row per project, ordered by sort';
+comment on table public.site_experience     is 'Experience - one row per item, ordered by sort';
+comment on table public.site_education      is 'Education - one row per item, ordered by sort';
+comment on table public.site_services       is 'Services - one row per service, ordered by sort';
+comment on table public.site_skills         is 'Skill groups - one row per group (chips = array of skills)';
+comment on table public.site_certifications is 'Certifications - one row per certificate';
+comment on table public.site_testimonials   is 'Testimonials - one row per recommendation';
 
--- ---------------------------------------------------------------------
---  Helpers (أدوات داخلية للتركيب والتفكيك)
--- ---------------------------------------------------------------------
 create or replace function public.pb_minus(p jsonb, k text)
 returns jsonb language sql immutable as $$
   select case when jsonb_typeof(p) = 'object' then p - k else p end;
@@ -200,9 +182,6 @@ returns jsonb language sql immutable as $$
    where not (e.key = any(known));
 $$;
 
--- ---------------------------------------------------------------------
---  write_portfolio_content: تفكيك الـ JSON لجداول منظمة (داخلية — محمية)
--- ---------------------------------------------------------------------
 create or replace function public.write_portfolio_content(p_content jsonb)
 returns void
 language plpgsql security definer set search_path = public as $$
@@ -213,7 +192,6 @@ declare
                           'testimonials'];
   v_extra jsonb;
 begin
-  -- 1) الأقسام المفردة: صف لكل قسم كما هو
   delete from public.site_content
    where site_content.key in ('brand','hero','about','contact','footer','settings','design','custom',
                               'projects','experience','education','services','skills','certifications',
@@ -223,13 +201,11 @@ begin
     from unnest(array['brand','hero','about','contact','footer','settings','design','custom']) as sec(key)
    where c ? sec.key;
 
-  -- أي مفاتيح غير معروفة بتتخزن في صف __extra — مفيش حاجة بتضيع أبدًا
   select public.pb_extra(c, v_known) into v_extra;
   if v_extra <> '{}'::jsonb then
     insert into public.site_content (key, data) values ('__extra', v_extra);
   end if;
 
-  -- رؤوس أقسام القوائم (كل حاجة في القسم ما عدا العناصر نفسها)
   if c ? 'projects'       then insert into public.site_content (key, data) values ('projects',       public.pb_minus(c -> 'projects', 'items'));       end if;
   if c ? 'experience'     then insert into public.site_content (key, data) values ('experience',     public.pb_minus(c -> 'experience', 'items'));     end if;
   if c ? 'education'      then insert into public.site_content (key, data) values ('education',      public.pb_minus(c -> 'education', 'items'));      end if;
@@ -238,7 +214,6 @@ begin
   if c ? 'certifications' then insert into public.site_content (key, data) values ('certifications', public.pb_minus(c -> 'certifications', 'certs')); end if;
   if c ? 'testimonials'   then insert into public.site_content (key, data) values ('testimonials',   public.pb_minus(c -> 'testimonials', 'items'));   end if;
 
-  -- 2) القوائم: صف لكل عنصر بالترتيب
   delete from public.site_projects;
   insert into public.site_projects (sort, title, year, tag, role, visual, github, demo, code, bullets, fields, extra)
   select x.ord,
@@ -320,16 +295,12 @@ begin
          lateral (select case when jsonb_typeof(r.item) = 'object' then r.item else '{}'::jsonb end as item,
                          r.ord as ord) x;
 
-  -- 3) وقت آخر حفظ + قائمة الأقسام الموجودة
   insert into public.site_meta (id, updated_at, sections)
   values ('main', now(),
           (select coalesce(jsonb_agg(k order by k), '[]'::jsonb) from (select jsonb_object_keys(c) as k) ks))
   on conflict (id) do update set updated_at = excluded.updated_at, sections = excluded.sections;
 end $$;
 
--- ---------------------------------------------------------------------
---  build_portfolio_content: إعادة تركيب نفس شكل JSON القديم من الجداول
--- ---------------------------------------------------------------------
 create or replace function public.build_portfolio_content()
 returns jsonb
 language sql stable security definer set search_path = public as $$
@@ -343,7 +314,6 @@ language sql stable security definer set search_path = public as $$
     || coalesce((select jsonb_build_object('settings',     s.data) from public.site_content s where s.key = 'settings'),     '{}'::jsonb)
     || coalesce((select jsonb_build_object('design',       s.data) from public.site_content s where s.key = 'design'),       '{}'::jsonb)
     || coalesce((select jsonb_build_object('custom',       s.data) from public.site_content s where s.key = 'custom'),       '{}'::jsonb)
-    -- projects
     || coalesce((
          select jsonb_build_object('projects',
            coalesce((select s.data from public.site_content s where s.key = 'projects'), '{}'::jsonb)
@@ -357,7 +327,6 @@ language sql stable security definer set search_path = public as $$
                     from public.site_projects p) x), '[]'::jsonb)))
          from public.site_meta m
         where m.id = 'main' and m.sections ? 'projects'), '{}'::jsonb)
-    -- experience
     || coalesce((
          select jsonb_build_object('experience',
            coalesce((select s.data from public.site_content s where s.key = 'experience'), '{}'::jsonb)
@@ -370,7 +339,6 @@ language sql stable security definer set search_path = public as $$
                     from public.site_experience e) x), '[]'::jsonb)))
          from public.site_meta m
         where m.id = 'main' and m.sections ? 'experience'), '{}'::jsonb)
-    -- education
     || coalesce((
          select jsonb_build_object('education',
            coalesce((select s.data from public.site_content s where s.key = 'education'), '{}'::jsonb)
@@ -383,7 +351,6 @@ language sql stable security definer set search_path = public as $$
                     from public.site_education d) x), '[]'::jsonb)))
          from public.site_meta m
         where m.id = 'main' and m.sections ? 'education'), '{}'::jsonb)
-    -- services
     || coalesce((
          select jsonb_build_object('services',
            coalesce((select s.data from public.site_content s where s.key = 'services'), '{}'::jsonb)
@@ -395,7 +362,6 @@ language sql stable security definer set search_path = public as $$
                     from public.site_services v) x), '[]'::jsonb)))
          from public.site_meta m
         where m.id = 'main' and m.sections ? 'services'), '{}'::jsonb)
-    -- skills
     || coalesce((
          select jsonb_build_object('skills',
            coalesce((select s.data from public.site_content s where s.key = 'skills'), '{}'::jsonb)
@@ -407,7 +373,6 @@ language sql stable security definer set search_path = public as $$
                     from public.site_skills g) x), '[]'::jsonb)))
          from public.site_meta m
         where m.id = 'main' and m.sections ? 'skills'), '{}'::jsonb)
-    -- certifications
     || coalesce((
          select jsonb_build_object('certifications',
            coalesce((select s.data from public.site_content s where s.key = 'certifications'), '{}'::jsonb)
@@ -419,7 +384,6 @@ language sql stable security definer set search_path = public as $$
                     from public.site_certifications ct) x), '[]'::jsonb)))
          from public.site_meta m
         where m.id = 'main' and m.sections ? 'certifications'), '{}'::jsonb)
-    -- testimonials
     || coalesce((
          select jsonb_build_object('testimonials',
            coalesce((select s.data from public.site_content s where s.key = 'testimonials'), '{}'::jsonb)
@@ -433,9 +397,6 @@ language sql stable security definer set search_path = public as $$
         where m.id = 'main' and m.sections ? 'testimonials'), '{}'::jsonb);
 $$;
 
--- ---------------------------------------------------------------------
---  save_portfolio: نفس التوقيع القديم بالظبط — الداشبورد مش هيتأثر
--- ---------------------------------------------------------------------
 create or replace function public.save_portfolio(p_password text, p_content jsonb)
 returns timestamptz
 language plpgsql security definer set search_path = public, extensions as $$
@@ -449,11 +410,7 @@ begin
   return ts;
 end $$;
 
--- =====================================================================
---  PART C — MIGRATION: نقل البيانات القديمة للجداول الجديدة + تحقق كامل
---  (لو حصل أي اختلاف بيتراجع كل حاجة تلقائيًا — مفيش فقدان بيانات)
--- =====================================================================
-do $mig$
+do $$
 declare
   is_table bool;
   legacy   jsonb;
@@ -471,32 +428,25 @@ begin
       perform public.write_portfolio_content(legacy);
     end if;
 
-    -- ✅ التحقق: البيانات المعاد تركيبها لازم تطابق الأصل 100%
     if legacy is not null and legacy <> '{}'::jsonb
        and public.build_portfolio_content() is distinct from legacy then
-      raise exception 'MIGRATION CHECK FAILED — إعادة تركيب البيانات اختلفت عن الأصل. مفيش أي تغيير حصل (اتراجع عن كل حاجة). جرب تاني أو راجع البيانات القديمة.';
+      raise exception 'MIGRATION CHECK FAILED: rebuilt content differs from the original blob. Nothing was changed (rolled back).';
     end if;
 
     drop table if exists public.portfolio_legacy_backup cascade;
     alter table public.portfolio rename to portfolio_legacy_backup;
-    raise notice 'Migrated old JSON content into organized tables ✓ (backup kept in portfolio_legacy_backup)';
+    raise notice 'Migrated old JSON content into organized tables OK (backup kept in portfolio_legacy_backup)';
   else
-    raise notice 'No legacy portfolio table found — fresh organized setup ✓';
+    raise notice 'No legacy portfolio table found - fresh organized setup OK';
   end if;
-end $mig$;
+end $$;
 
--- =====================================================================
---  PART D — VIEW `portfolio`: نفس الواجهة القديمة للموقع والداشبورد
--- =====================================================================
 drop view if exists public.portfolio;
 create view public.portfolio as
 select 'main'::text                                                    as id,
        coalesce(public.build_portfolio_content(), '{}'::jsonb)         as content,
        (select sm.updated_at from public.site_meta sm where sm.id = 'main') as updated_at;
 
--- ---------------------------------------------------------------------
---  Security — القراءة العامة عن طريق الـ VIEW فقط، والجداول نفسها مقفولة
--- ---------------------------------------------------------------------
 alter table public.site_content        enable row level security;
 alter table public.site_meta           enable row level security;
 alter table public.site_projects       enable row level security;
@@ -507,9 +457,6 @@ alter table public.site_skills         enable row level security;
 alter table public.site_certifications enable row level security;
 alter table public.site_testimonials   enable row level security;
 alter table public.portfolio_auth      enable row level security;
--- (no policies on these tables → the API can't read/write them directly;
---  the `portfolio` view runs as the table owner so the site stays public-read,
---  and writes only happen through the password-protected RPCs)
 
 revoke all on public.site_content, public.site_meta, public.site_projects,
              public.site_experience, public.site_education, public.site_services,
@@ -523,15 +470,11 @@ revoke all on function public.pb_minus(jsonb, text), public.pb_list(jsonb, text)
 
 grant usage on schema public to anon, authenticated;
 grant select on public.portfolio to anon, authenticated;
--- الدالة دي read-only وبترجع نفس محتوى الـ view العام — لازمة عشان الـ view يشتغل مع anon
 grant execute on function public.build_portfolio_content() to anon, authenticated;
 grant execute on function public.check_password(text)        to anon, authenticated;
 grant execute on function public.save_portfolio(text, jsonb) to anon, authenticated;
 grant execute on function public.change_password(text, text) to anon, authenticated;
 
--- =====================================================================
---  PART E — Analytics events + Contact messages (unchanged from v1/v2)
--- =====================================================================
 create table if not exists public.portfolio_events (
   id          bigserial primary key,
   event       text not null,
@@ -550,7 +493,6 @@ create table if not exists public.portfolio_messages (
   status      text not null default 'new',   -- new / read / replied
   created_at  timestamptz not null default now()
 );
--- لو الجدول اتعمل في نسخة أقدم مكنش فيها عمود الحالة
 alter table public.portfolio_messages add column if not exists status text not null default 'new';
 
 create index if not exists portfolio_messages_created_idx on public.portfolio_messages (created_at desc);
@@ -579,7 +521,6 @@ grant select, insert on public.portfolio_events   to anon, authenticated;
 grant select, insert on public.portfolio_messages to anon, authenticated;
 grant usage, select on all sequences in schema public to anon, authenticated;
 
--- RPC الإحصائيات اللي الداشبورد بيقراها
 create or replace function public.get_analytics(p_days int default 30)
 returns jsonb
 language sql
@@ -631,7 +572,6 @@ as $$
   );
 $$;
 
--- تعليم الرسالة (جديدة / مقروءة / تم الرد) — محمية بالباسورد
 create or replace function public.update_message(p_password text, p_id bigint, p_status text)
 returns boolean
 language plpgsql
@@ -653,13 +593,10 @@ end $$;
 grant execute on function public.get_analytics(int)                   to anon, authenticated;
 grant execute on function public.update_message(text, bigint, text)   to anon, authenticated;
 
--- =====================================================================
---  PART F — ملخص بيظهر لك بعد التشغيل
--- =====================================================================
-do $summary$
+do $$
 declare r int;
 begin
-  raise notice '────────────────────────── ORGANIZED DATA READY ──────────────────────────';
+  raise notice '---------- ORGANIZED DATA READY ----------';
   raise notice 'site_content        : % rows', (select count(*) from public.site_content);
   raise notice 'site_projects       : % rows', (select count(*) from public.site_projects);
   raise notice 'site_experience     : % rows', (select count(*) from public.site_experience);
@@ -670,6 +607,6 @@ begin
   raise notice 'site_testimonials   : % rows', (select count(*) from public.site_testimonials);
   raise notice 'portfolio (view)    : content size = % chars',
               length((select content::text from public.portfolio where id = 'main'));
-  raise notice 'افتح Supabase → Table Editor وشوف الجداول الجديدة 👌';
-  raise notice '───────────────────────────────────────────────────────────────────────────';
-end $summary$;
+  raise notice 'Open Supabase -> Table Editor to see the new tables.';
+  raise notice '------------------------------------------';
+end $$;
