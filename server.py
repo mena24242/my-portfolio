@@ -20,7 +20,59 @@ DIR = os.path.dirname(os.path.abspath(__file__))
 CONTENT_FILE = os.path.join(DIR, "content.json")
 INDEX_FILE = os.path.join(DIR, "index.html")
 
-BAKE_RE = re.compile(r"window\.__BAKED_CONTENT__\s*=\s*[^;]*;")
+MARKER = "window.__BAKED_CONTENT__"
+
+
+def find_baked(html):
+    """Locate the baked JSON object.
+
+    Scan braces instead of using a regex: project code stored inside the JSON
+    contains ';' characters, and a regex stopping at the first one truncates the
+    content and leaves dead junk behind on the same line.
+    """
+    i = html.find(MARKER)
+    if i < 0:
+        return None
+    s = html.find("{", i)
+    if s < 0:
+        return None
+    depth = 0
+    in_str = False
+    quote = ""
+    esc = False
+    for k in range(s, len(html)):
+        c = html[k]
+        if in_str:
+            if esc:
+                esc = False
+            elif c == "\\":
+                esc = True
+            elif c == quote:
+                in_str = False
+            continue
+        if c in ('"', "'"):
+            in_str = True
+            quote = c
+        elif c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+            if depth == 0:
+                return (i, s, k + 1)
+    return None
+
+
+def bake_into(html, line):
+    spot = find_baked(html)
+    if not spot:
+        return html.replace("const STORE_KEY", line + "\nconst STORE_KEY", 1)
+    start, _open, end = spot
+    after = end + 1 if end < len(html) and html[end] == ";" else end
+    nl = html.find("\n", after)
+    rest = html[after:] if nl == -1 else html[after:nl]
+    if rest.strip():                     # drop leftover junk sitting on that line
+        after = len(html) if nl == -1 else nl
+    return html[:start] + line + html[after:]
 
 
 def bake(data):
@@ -29,10 +81,7 @@ def bake(data):
         html = f.read()
     baked = json.dumps(data, ensure_ascii=False).replace("<", "\\u003c")
     new_line = "window.__BAKED_CONTENT__ = " + baked + ";"
-    if BAKE_RE.search(html):
-        html = BAKE_RE.sub(new_line, html, count=1)
-    else:
-        html = html.replace("const STORE_KEY", new_line + "\nconst STORE_KEY", 1)
+    html = bake_into(html, new_line)
     with open(INDEX_FILE, "w", encoding="utf-8") as f:
         f.write(html)
 
