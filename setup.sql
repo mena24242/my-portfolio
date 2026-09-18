@@ -709,8 +709,13 @@ comment on view public.site_events_log     is 'Every visitor event in plain Engl
 comment on function public.pb_event_source(jsonb, text) is 'Traffic source for one event (meta.source, utm_source, fbclid or direct)';
 comment on function public.pb_clean_path(text) is 'Strips fbclid/gclid/igshid tracking junk from a path';
 
-grant select on public.site_visitors, public.site_traffic_daily, public.site_events_log
-  to anon, authenticated;
+-- these three views are for YOUR eyes in the Supabase dashboard (Table Editor).
+-- RLS cannot be enabled on views, so they are locked by revoking the public API
+-- grants instead: the anon key can no longer read them, while Table Editor
+-- (your logged-in dashboard role) still can. The site and the dashboard do not
+-- read these views - they use portfolio_events and get_analytics() directly.
+revoke select on public.site_visitors, public.site_traffic_daily, public.site_events_log
+  from anon, authenticated, public;
 
 -- 3) indexes that keep the views fast as the log grows
 create index if not exists portfolio_events_event_idx   on public.portfolio_events (event, created_at desc);
