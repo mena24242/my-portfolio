@@ -535,12 +535,13 @@ as $$
   ),
   totals as (
     select jsonb_build_object(
-      'view',           count(*) filter (where event = 'view'),
-      'project_view',   count(*) filter (where event = 'project_view'),
-      'cv_download',    count(*) filter (where event in ('cv_download', 'download_cv')),
-      'github_click',   count(*) filter (where event = 'github_click'),
-      'linkedin_click', count(*) filter (where event = 'linkedin_click'),
-      'contact_submit', count(*) filter (where event in ('contact_submit', 'generate_lead'))
+      'view',            count(*) filter (where event = 'view'),
+      'unique_visitors', count(distinct coalesce(visitor_id, 'anon')) filter (where event = 'view'),
+      'project_view',    count(*) filter (where event = 'project_view'),
+      'cv_download',     count(*) filter (where event in ('cv_download', 'download_cv')),
+      'github_click',    count(*) filter (where event = 'github_click'),
+      'linkedin_click',  count(*) filter (where event = 'linkedin_click'),
+      'contact_submit',  count(*) filter (where event in ('contact_submit', 'generate_lead'))
     ) as j
     from ev
   ),
@@ -563,12 +564,29 @@ as $$
                  from ev where event = 'project_view'
                 group by 1 order by cnt desc limit 1) t),
       'null'::jsonb) as j
+  ),
+  sources as (
+    /* where visitors came from: meta.source (new rows) or utm/fbclid in path (old rows) */
+    select coalesce(
+      (select jsonb_agg(jsonb_build_object('source', s.src, 'visits', s.cnt) order by s.cnt desc)
+         from (select coalesce(nullif(ev.meta->>'source', ''),
+                             substring(ev.path from 'utm_source=([^&]+)'),
+                             case when ev.path like '%fbclid=%' then 'facebook' else 'direct' end) as src,
+                      count(*) as cnt
+                 from ev
+                where event = 'view'
+                group by 1
+                order by cnt desc
+                limit 6) s),
+      '[]'::jsonb) as j
   )
   select jsonb_build_object(
     'days',        coalesce(p_days, 30),
     'totals',      (select j from totals),
     'daily',       (select j from daily),
-    'top_project', (select j from top)
+    'top_project', (select j from top),
+    'sources',     (select j from sources),
+    'messages',    (select count(*) from public.portfolio_messages)
   );
 $$;
 

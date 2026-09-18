@@ -782,8 +782,44 @@ var MM_VID = (function(){
 })();
 window.MM_VID = MM_VID;
 
+/* framed? (dashboard preview / iframe) → never track, keeps real visitor stats clean */
+var MM_FRAMED = false;
+try{ MM_FRAMED = (window.self !== window.top); }catch(_e){ MM_FRAMED = true; }
+
+/* where did this visitor come from? (instagram / facebook / direct / referrer host) */
+function mmSource(){
+  try{
+    var q = location.search || '';
+    var m = q.match(/[?&]utm_source=([^&]+)/);
+    if(m) return decodeURIComponent(m[1]).toLowerCase().slice(0, 40);
+    if(/[?&]fbclid=/.test(q)) return 'facebook';
+    if(document.referrer){
+      try{
+        var h = new URL(document.referrer).hostname.replace(/^www\./,'');
+        if(h && location.hostname && h.indexOf(location.hostname) === -1) return h.slice(0, 40);
+      }catch(_e){}
+    }
+  }catch(_e){}
+  return 'direct';
+}
+
+/* clean path: drop fbclid/gclid/hash junk, keep utm — readable rows in Supabase */
+function mmCleanPath(){
+  try{
+    var u = new URL(location.href);
+    var q = ['utm_source','utm_medium','utm_campaign'].map(function(k){
+      var m = (u.search || '').match(new RegExp('[?&]' + k + '=([^&]*)'));
+      return m ? k + '=' + m[1] : null;
+    }).filter(Boolean).join('&');
+    return (u.pathname + (q ? '?' + q : '')).slice(0, 180) || '/';
+  }catch(_e){
+    return (typeof location !== 'undefined' && location.pathname) ? location.pathname : '/';
+  }
+}
+
 function mmTrack(event, meta){
   try{
+    if(MM_FRAMED) return Promise.resolve();          /* no stats from dashboard preview */
     if(typeof fetch !== 'function') return Promise.resolve();
     var sbUrl = SB_MM.url;
     var sbKey = SB_MM.key;
@@ -792,7 +828,7 @@ function mmTrack(event, meta){
       event: event,
       visitor_id: MM_VID,
       meta: (meta && typeof meta === 'object') ? meta : (meta ? { value: meta } : {}),
-      path: (typeof location !== 'undefined' && location.pathname) ? (location.pathname + (location.search || '') + (location.hash || '')) : '/'
+      path: mmCleanPath()
     };
     return fetch(sbUrl + '/rest/v1/portfolio_events', {
       method: 'POST',
@@ -805,8 +841,17 @@ function mmTrack(event, meta){
 }
 window.mmTrack = mmTrack;
 
+/* count a real visit once per 30 minutes per visitor (refreshes don't inflate stats) */
 try{
-  mmTrack('view');
+  if(!MM_FRAMED){
+    var _lastView = 0;
+    try{ _lastView = parseInt(localStorage.getItem('mm_last_view') || '0', 10) || 0; }catch(_e){}
+    var _now = Date.now();
+    if(_now - _lastView > 30 * 60 * 1000){
+      try{ localStorage.setItem('mm_last_view', String(_now)); }catch(_e){}
+      mmTrack('view', { source: mmSource() });
+    }
+  }
 }catch(_e){}
 
 /* =====================================================================
@@ -2186,9 +2231,8 @@ document.addEventListener('submit', function(e){
           if(typeof gtag === 'function') gtag('event', 'generate_lead', { currency: 'EGP', value: 1 });
           if(typeof fbq === 'function') fbq('track', 'Lead');
         }
-        if(window.mmTrack){
-          mmTrack('generate_lead', { source: 'contact_form', email: email, name: name });
-        }
+        /* note: generate_lead is NOT sent to Supabase — contact_submit (fired above)
+           already counted it once. Double events = double counting in Analytics. */
       }catch(_e){}
     }).catch(function(err){
       if(status){ status.textContent = t('Something went wrong — email me directly.'); status.className = 'form-status err'; }
