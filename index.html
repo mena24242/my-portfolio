@@ -1562,15 +1562,7 @@ function applyTrackingFromSettings(){
     // also allow downgrade: if content cleared an ID, we don't unload but we keep queue
   }catch(e){}
 }
-/* hero “Download CV” button — only shown when the dashboard sets a CV (file or link) */
-function cvHeroBtn(){
-  var cv = getCv();
-  if(!cv.visible || !cv.explicit) return '';   /* only when the dashboard actually set a CV */
-  var label = t(cv.label) || 'Download CV';
-  return '<a class="btn btn-ghost cv-hero-btn" href="'+esc(cv.href)+'" data-track="download_cv" data-track-location="hero"'+
-    (cv.download ? ' download="'+esc(cv.name || '')+'"' : '')+
-    '><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 21h16"/></svg> '+esc(label)+'</a>';
-}
+/* The “Download CV” button lives ONLY in the navbar (navCtaDesk / navCtaMob) — no hero button. */
 function applyNavLabels(){
   document.querySelectorAll('[data-nav]').forEach(a=>{
     const key = a.dataset.nav;
@@ -1605,7 +1597,6 @@ function renderHero(){
       '<div class="hero-cta">'+
         '<a class="btn btn-primary" href="#projects"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12l7 7 7-7"/></svg> '+esc(t('View My Work'))+'</a>'+
         '<a class="btn btn-ghost" href="#contact"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg> '+esc(t('Get In Touch'))+'</a>'+
-        cvHeroBtn()+
       '</div>'+
       '<div class="stats">'+stats+'</div>'+
     '</div>'+
