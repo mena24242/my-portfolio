@@ -509,8 +509,8 @@ R.hero = function(){
             '<button class="mini danger" data-act="cv-del">Remove</button></div>'
         : '<p style="color:var(--muted);font-size:13px;margin-bottom:10px">No CV uploaded yet. Add your PDF or Word file below and visitors can download it from the site.</p>'+
           '<button class="mini" data-act="cv-upload">⬆ Upload CV (PDF / Word)</button>')+
-      '<label class="switch-row" style="margin-top:12px"><input type="checkbox" data-bool="cv.visible"'+(cv.visible!==false?' checked':'')+'><span>Show the “Download CV” button on the site (navbar + hero)</span></label>'+
-      '<div class="hint" style="margin-top:8px">الملف المرفوع هنا بياخد الأولوية على أي لينك CV في تبويب Settings، وبيظهر في زراير الناف بار و في زرار جديد جوه الهيرو. بعد الرفع دوس <b>Save to Supabase</b>.</div></div>'+
+      '<label class="switch-row" style="margin-top:12px"><input type="checkbox" data-bool="cv.visible"'+(cv.visible!==false?' checked':'')+'><span>Show the “Download CV” button on the site (navbar only)</span></label>'+
+      '<div class="hint" style="margin-top:8px">الملف المرفوع هنا بياخد الأولوية على أي لينك CV في تبويب Settings، وبيظهر في زراير الناف بار (ديسكتوب وموبايل) بس. بعد الرفع دوس <b>Save to Supabase</b>.</div></div>'+
     '<div class="card"><h3>Brand<span class="line"></span></h3><div class="row">'+field('Name (navbar)','brand.name')+field('Tag (under name)','brand.tag')+'</div></div>'+
     '<div class="card"><h3>Hero text<span class="line"></span></h3>'+
       field('Pill (badge above name)','hero.pill')+
