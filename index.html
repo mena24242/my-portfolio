@@ -768,35 +768,64 @@ const SB_MM = {
 };
 window.SB_MM = SB_MM;
 
-var MM_VID = (function(){
-  try{
-    var id = localStorage.getItem('mm_vid');
-    if(!id){
-      id = 'v_' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
-      localStorage.setItem('mm_vid', id);
-    }
-    return id;
-  }catch(_e){
-    return 'v_' + Math.random().toString(36).slice(2, 10);
-  }
-})();
-window.MM_VID = MM_VID;
-
 /* framed? (dashboard preview / iframe) → never track, keeps real visitor stats clean */
 var MM_FRAMED = false;
 try{ MM_FRAMED = (window.self !== window.top); }catch(_e){ MM_FRAMED = true; }
 
-/* where did this visitor come from? (instagram / facebook / direct / referrer host) */
+/* ---- visitor id: short & sequential (V-0001, V-0002, …) served by the DB ---- */
+var MM_VID = '';   /* updated as soon as the id is known (sync copy for other code) */
+window.MM_VID = '';
+var MM_VID_PROMISE = (function(){
+  function done(id){
+    try{ localStorage.setItem('mm_vid', id); }catch(_e){}
+    MM_VID = id; window.MM_VID = id;
+    return id;
+  }
+  if(MM_FRAMED) return Promise.resolve('');
+  try{
+    var cur = localStorage.getItem('mm_vid');
+    if(cur && /^V-\d{3,}$/.test(cur)) return Promise.resolve(done(cur));
+  }catch(_e){}
+  var fb = function(){ return done('V-' + String(Date.now()).slice(-6)); };
+  try{
+    return fetch(SB_MM.url + '/rest/v1/rpc/next_visitor_id', { method:'POST', headers: SB_MM.headers(), body: '{}' })
+      .then(function(r){ return r.ok ? r.json() : Promise.reject(0); })
+      .then(function(id){ return (typeof id === 'string' && /^V-\d{3,}$/.test(id)) ? done(id) : fb(); })
+      .catch(fb);
+  }catch(_e){ return Promise.resolve(fb()); }
+})();
+window.MM_VID_PROMISE = MM_VID_PROMISE;
+
+/* ---- traffic source names: always the full, recognizable place name ---- */
+function mmCanonicalSource(s){
+  s = String(s || '').toLowerCase().trim().replace(/^www\./, '');
+  if(!s || s === '(direct)' || s === 'none') return 'direct';
+  if(s === 'ig' || s === 'insta' || s.indexOf('instagram') > -1) return 'instagram';
+  if(s === 'fb' || s.indexOf('facebook') > -1 || s.indexOf('fb.me') > -1) return 'facebook';
+  if(s === 'in' || s.indexOf('linkedin') > -1 || s.indexOf('lnkd.in') > -1) return 'linkedin';
+  if(s === 'x' || s === 'x.com' || s === 't.co' || s.indexOf('twitter') > -1) return 'twitter';
+  if(s === 'wa' || s.indexOf('whatsapp') > -1) return 'whatsapp';
+  if(s === 'tg' || s.indexOf('t.me') > -1 || s.indexOf('telegram') > -1) return 'telegram';
+  if(s === 'yt' || s === 'youtu.be' || s.indexOf('youtube') > -1) return 'youtube';
+  if(s.indexOf('tiktok') > -1) return 'tiktok';
+  if(s.indexOf('reddit') > -1 || s === 'redd.it') return 'reddit';
+  if(s.indexOf('github') > -1) return 'github';
+  if(s.indexOf('gmail') > -1 || s === 'email' || s === 'newsletter' || s === 'mail') return 'email';
+  return s;   /* any other site: keep its full hostname, e.g. google.com */
+}
+window.mmCanonicalSource = mmCanonicalSource;
+
+/* where did this visitor come from? (instagram / facebook / linkedin / full host / direct) */
 function mmSource(){
   try{
     var q = location.search || '';
     var m = q.match(/[?&]utm_source=([^&]+)/);
-    if(m) return decodeURIComponent(m[1]).toLowerCase().slice(0, 40);
+    if(m) return mmCanonicalSource(decodeURIComponent(m[1]));
     if(/[?&]fbclid=/.test(q)) return 'facebook';
     if(document.referrer){
       try{
         var h = new URL(document.referrer).hostname.replace(/^www\./,'');
-        if(h && location.hostname && h.indexOf(location.hostname) === -1) return h.slice(0, 40);
+        if(h && location.hostname && h.indexOf(location.hostname) === -1) return mmCanonicalSource(h);
       }catch(_e){}
     }
   }catch(_e){}
@@ -826,14 +855,17 @@ function mmTrack(event, meta){
     if(!sbUrl || !sbKey) return Promise.resolve();
     var payload = {
       event: event,
-      visitor_id: MM_VID,
       meta: (meta && typeof meta === 'object') ? meta : (meta ? { value: meta } : {}),
       path: mmCleanPath()
     };
-    return fetch(sbUrl + '/rest/v1/portfolio_events', {
-      method: 'POST',
-      headers: SB_MM.headers(),
-      body: JSON.stringify(payload)
+    /* wait for the (short, sequential) visitor id, then send */
+    return MM_VID_PROMISE.then(function(vid){
+      payload.visitor_id = vid || MM_VID || null;
+      return fetch(sbUrl + '/rest/v1/portfolio_events', {
+        method: 'POST',
+        headers: SB_MM.headers(),
+        body: JSON.stringify(payload)
+      });
     }).catch(function(){});
   }catch(_e){
     return Promise.resolve();

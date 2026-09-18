@@ -184,10 +184,31 @@ $$;
 
 create or replace function public.pb_event_source(p_meta jsonb, p_path text)
 returns text language sql immutable as $$
-  select lower(left(coalesce(
+  /* always the full, recognizable place name: instagram / facebook / linkedin / ... */
+  select case
+    when s = '' or s in ('direct', '(direct)', 'none')           then 'direct'
+    when s in ('ig', 'insta', 'instagram')
+      or s like '%instagram.com%'                                then 'instagram'
+    when s in ('fb', 'facebook', 'fb.me')
+      or s like '%facebook.com%' or s like '%fb.watch%'          then 'facebook'
+    when s in ('in', 'linkedin', 'lnkd.in')
+      or s like '%linkedin.com%'                                 then 'linkedin'
+    when s in ('x', 'x.com', 'twitter', 't.co')
+      or s like '%twitter.com%'                                  then 'twitter'
+    when s in ('wa', 'whatsapp') or s like '%whatsapp.com%'      then 'whatsapp'
+    when s in ('tg', 'telegram', 't.me')                         then 'telegram'
+    when s in ('yt', 'youtube', 'youtu.be')                      then 'youtube'
+    when s like '%tiktok.com%'                                   then 'tiktok'
+    when s like '%reddit.com%' or s = 'redd.it'                  then 'reddit'
+    when s like '%github.com%' or s like '%gist.github.com%'     then 'github'
+    when s like '%gmail.com%'
+      or s in ('email', 'newsletter', 'mail')                    then 'email'
+    else s   /* any other site: keep its full hostname, e.g. google.com */
+  end
+  from (select lower(left(coalesce(
            nullif(p_meta ->> 'source', ''),
            substring(coalesce(p_path, '') from 'utm_source=([^&]+)'),
-           case when coalesce(p_path, '') like '%fbclid=%' then 'facebook' else 'direct' end), 40));
+           case when coalesce(p_path, '') like '%fbclid=%' then 'facebook' else 'direct' end), 60)) as s) q;
 $$;
 
 create or replace function public.pb_clean_path(p text)
@@ -513,6 +534,19 @@ alter table public.portfolio_messages add column if not exists status text not n
 
 create index if not exists portfolio_messages_created_idx on public.portfolio_messages (created_at desc);
 create index if not exists portfolio_events_created_idx   on public.portfolio_events   (created_at desc);
+
+-- short sequential visitor ids (V-0001, V-0002, ...): the site asks for one
+-- number per browser (once), so ids are readable and never random gibberish
+create sequence if not exists public.portfolio_visitor_seq;
+
+create or replace function public.next_visitor_id()
+returns text
+language sql security definer set search_path = public as $$
+  select 'V-' || lpad(nextval('public.portfolio_visitor_seq')::text, 4, '0');
+$$;
+
+revoke all on function public.next_visitor_id() from public;
+grant execute on function public.next_visitor_id() to anon, authenticated;
 
 alter table public.portfolio_events   enable row level security;
 alter table public.portfolio_messages enable row level security;

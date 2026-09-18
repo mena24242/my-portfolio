@@ -780,7 +780,24 @@ function analyticsFromRows(rows, days){
   const t = { view:0, unique_visitors:0, project_view:0, cv_download:0, github_click:0, linkedin_click:0, contact_submit:0 };
   const visitors = new Set(), perDay = {}, proj = {}, src = {};
   for(let i = 0; i <= days; i++){ perDay[new Date(Date.now() - (days - i) * 864e5).toISOString().slice(0,10)] = { v: new Set(), n: 0 }; } /* inclusive ends = 31 rows, same as SQL */
-  const srcOf = e => String((e.meta && e.meta.source) || ((e.path || '').match(/utm_source=([^&]+)/) || [])[1] || (/fbclid=/.test(e.path || '') ? 'facebook' : 'direct')).toLowerCase().slice(0, 40);
+  /* full, recognizable place names - identical mapping to pb_event_source() in SQL */
+  const canon = s => {
+    s = String(s || '').toLowerCase().trim().replace(/^www\./, '');
+    if(!s || s === '(direct)' || s === 'none') return 'direct';
+    if(s === 'ig' || s === 'insta' || s.includes('instagram')) return 'instagram';
+    if(s === 'fb' || s.includes('facebook') || s.includes('fb.me')) return 'facebook';
+    if(s === 'in' || s.includes('linkedin') || s.includes('lnkd.in')) return 'linkedin';
+    if(s === 'x' || s === 'x.com' || s === 't.co' || s.includes('twitter')) return 'twitter';
+    if(s === 'wa' || s.includes('whatsapp')) return 'whatsapp';
+    if(s === 'tg' || s.includes('t.me') || s.includes('telegram')) return 'telegram';
+    if(s === 'yt' || s === 'youtu.be' || s.includes('youtube')) return 'youtube';
+    if(s.includes('tiktok')) return 'tiktok';
+    if(s.includes('reddit') || s === 'redd.it') return 'reddit';
+    if(s.includes('github')) return 'github';
+    if(s.includes('gmail') || s === 'email' || s === 'newsletter' || s === 'mail') return 'email';
+    return s;
+  };
+  const srcOf = e => canon((e.meta && e.meta.source) || ((e.path || '').match(/utm_source=([^&]+)/) || [])[1] || (/fbclid=/.test(e.path || '') ? 'facebook' : 'direct'));
   (rows || []).forEach(e => {
     const k = String(e.created_at || '').slice(0, 10);
     if(!(k in perDay)) return;
