@@ -734,6 +734,10 @@ grant execute on function public.update_message(text, bigint, text)   to anon, a
 -- =====================================================================
 --  PART G - VISITOR DATA MADE READABLE (one-time cleanup + views + retention)
 -- =====================================================================
+--  RULE for the views below: they already exist in live projects, and
+--  CREATE OR REPLACE VIEW may only ADD columns AT THE END (renaming, reordering or
+--  inserting in the middle aborts the whole script with
+--  "cannot change name of view column ..."). Any new field goes after the last one.
 
 -- 1) one-time hygiene for OLD rows (every statement below is a no-op once done)
 --    ORDER MATTERS: derive the source from the path BEFORE stripping fbclid from it
@@ -760,18 +764,20 @@ select
   min(created_at) filter (where event = 'view')              as first_visit,
   max(created_at)                                            as last_seen,
   mode() within group (order by public.pb_event_source(meta, path)) filter (where event = 'view') as main_source,
-  /* where this visitor is: city / country resolved from their IP address
-     (approximate, city level, no GPS is ever used). Latest known value wins. */
+  count(*) filter (where event = 'project_view')             as project_opens,
+  count(*) filter (where event in ('cv_download', 'download_cv')) as cv_downloads,
+  count(*) filter (where event in ('contact_submit', 'generate_lead')) as form_submits,
+  count(*)                                                   as total_events,
+  /* where this visitor is: city / country resolved from their IP address (approximate,
+     city level, no GPS is ever used). Latest known value wins. NOTE: appended at the END
+     on purpose - CREATE OR REPLACE VIEW may add columns but never reorder or rename
+     existing ones, and this view already exists in live projects. */
   (array_agg(meta ->> 'city'        order by created_at desc) filter (where nullif(coalesce(meta ->> 'city', ''), '') is not null))[1]        as city,
   (array_agg(meta ->> 'country'     order by created_at desc) filter (where nullif(coalesce(meta ->> 'country', ''), '') is not null))[1]     as country,
   (array_agg(meta ->> 'country_code' order by created_at desc) filter (where nullif(coalesce(meta ->> 'country_code', ''), '') is not null))[1] as country_code,
   nullif(concat_ws(', ',
     (array_agg(meta ->> 'city'    order by created_at desc) filter (where nullif(coalesce(meta ->> 'city', ''), '') is not null))[1],
-    (array_agg(meta ->> 'country' order by created_at desc) filter (where nullif(coalesce(meta ->> 'country', ''), '') is not null))[1]), '') as location,
-  count(*) filter (where event = 'project_view')             as project_opens,
-  count(*) filter (where event in ('cv_download', 'download_cv')) as cv_downloads,
-  count(*) filter (where event in ('contact_submit', 'generate_lead')) as form_submits,
-  count(*)                                                   as total_events
+    (array_agg(meta ->> 'country' order by created_at desc) filter (where nullif(coalesce(meta ->> 'country', ''), '') is not null))[1]), '') as location
 from public.portfolio_events
 group by coalesce(visitor_id, '(unknown)');
 
@@ -813,10 +819,10 @@ select
       where v.visitor_id = portfolio_events.visitor_id and v.event = 'view'),
     public.pb_event_source(meta, path))                                  as source,
   coalesce(meta ->> 'project', meta ->> 'title', meta ->> 'url', meta ->> 'email', '') as details,
+  path,
   /* city + country from the visitor IP (no GPS). Empty for rows saved before the
-     location feature was installed */
-  nullif(concat_ws(', ', nullif(meta ->> 'city', ''), nullif(meta ->> 'country', '')), '') as location,
-  path
+     location feature was installed. Appended last - see the site_visitors note. */
+  nullif(concat_ws(', ', nullif(meta ->> 'city', ''), nullif(meta ->> 'country', '')), '') as location
 from public.portfolio_events
 order by created_at desc;
 
