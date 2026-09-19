@@ -1260,23 +1260,3 @@ main.addEventListener('click', async e => {
 </script>
 </body>
 </html>
-t });
-      if(ok === true) loadMessages(); else flash('Message not found', 'err');
-    }catch(e){
-      b.disabled = false;
-      if(/WRONG_PASSWORD/.test(e.message)){ flash('Session expired — please log in again', 'err'); doLogout(); }
-      else flash('Failed: ' + e.message, 'err');
-    }
-    return; }
-});
-</script>
-</body>
-</html>
-; }
-      else flash('Failed: ' + e.message, 'err');
-    }
-    return; }
-});
-</script>
-</body>
-</html>
