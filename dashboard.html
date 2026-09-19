@@ -1210,19 +1210,6 @@ async function loadAnalytics(){
     (daily.length && totVis > 0 ? '<div class="chart">' + bars + '</div>' : '<p style="color:var(--muted);font-size:13px;padding:14px 0">No visits with a known visitor yet — the chart fills in as people (or you, on the live site) visit.</p>'));
 }
 
-/* ---- ✉️ Messages / Contact ---- */
-          '<time>'+new Date(m.created_at).toLocaleString()+'</time></div>'+
-        '<p class="msg-text"'+(unread ? ' data-act="msg-open" data-id="'+m.id+'" style="cursor:pointer" title="Click to mark as read"' : '')+'>'+esc(m.message)+'</p>'+
-        '<div class="msg-actions">'+
-          '<a class="mini" style="text-decoration:none" href="mailto:'+esc(m.email)+'">✉️ Reply by email</a>'+
-          (m.status !== 'read' ? '<button class="mini" data-act="msg-status" data-id="'+m.id+'" data-status="read">✓ Mark read</button>' : '')+
-          (m.status !== 'replied' ? '<button class="mini" data-act="msg-status" data-id="'+m.id+'" data-status="replied">↩ Mark replied</button>' : '')+
-          (m.status !== 'new' ? '<button class="mini" data-act="msg-status" data-id="'+m.id+'" data-status="new">↺ Back to new</button>' : '')+
-        '</div></div>';
-    }).join('')
-    : '<p style="color:var(--muted);font-size:13px">No messages '+(msgFilter==='all' ? 'yet — once your live site\'s contact form posts here they will appear in this list.' : 'with this status.')+'</p>');
-}
-
 function renderTab(tab){
   currentTab = tab;
   document.querySelectorAll('#tabs .tab').forEach(b=> b.classList.toggle('active', b.dataset.tab === tab));
