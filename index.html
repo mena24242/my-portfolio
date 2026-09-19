@@ -796,6 +796,106 @@ var MM_VID_PROMISE = (function(){
 })();
 window.MM_VID_PROMISE = MM_VID_PROMISE;
 
+/* ---- visitor location: approximate CITY + COUNTRY resolved from the IP address.
+   No GPS and no browser location permission is ever requested (no prompt, no
+   geolocation API call) — the browser cannot see its own IP anyway, so the city
+   comes from a free public IP-geolocation lookup, exactly like the one every
+   analytics tool uses. It is coarse by design: city / region / country only.
+   Nothing precise is stored — no coordinates, and the IP itself is never saved. */
+var MM_LOC_KEY = 'mm_loc';
+var MM_LOC_TTL = 6 * 60 * 60 * 1000;    /* re-look-up at most every 6 hours */
+var MM_LOC_WAIT = 1500;                 /* an event is never held longer than this for a lookup */
+var MM_LOC_ONE = 2000;                  /* per-provider timeout */
+var MM_LOC_SERVICES = [
+  /* [url, reader] — each provider spells the fields differently, so map them here */
+  ['https://ipwho.is/', function(d){
+     if(d && d.success === false) return null;
+     return { city: d.city, region: d.region, country: d.country, code: d.country_code };
+   }],
+  ['https://ipapi.co/json/', function(d){
+     if(d && d.error) return null;
+     return { city: d.city, region: d.region, country: d.country_name, code: d.country_code };
+   }],
+  ['https://free.freeipapi.com/api/v1/json', function(d){
+     return { city: d.cityName, region: d.regionName, country: d.countryName, code: d.countryCode };
+   }],
+  ['https://get.geojs.io/v1/ip/geo.json', function(d){
+     return { city: d.city, region: d.region, country: d.country, code: d.country_code };
+   }]
+];
+var MM_LOC = null;            /* the location as soon as it is known (sync copy for other code) */
+var MM_LOC_LATE = 0;          /* events that had to go out before the lookup was done */
+var MM_LOC_BACKFILL = false;  /* the late location was already pushed as its own row */
+
+/* keep only the readable, coarse pieces (and never junk like "unknown") */
+function mmCleanLoc(o){
+  if(!o || typeof o !== 'object') return null;
+  function one(v){
+    v = String(v == null ? '' : v).replace(/[<>]/g, '').trim();
+    if(!v || v === '-' || /^(unknown|private|reserved|localhost|loopback)$/i.test(v)) return '';
+    return v.slice(0, 64);
+  }
+  var loc = { city: one(o.city), region: one(o.region), country: one(o.country), code: one(o.code).toUpperCase().slice(0, 2) };
+  if(!loc.city && !loc.country) return null;
+  return loc;
+}
+
+function mmSaveLoc(loc){
+  MM_LOC = loc || null;
+  window.MM_LOC = MM_LOC;
+  if(!loc) return null;
+  try{
+    localStorage.setItem(MM_LOC_KEY, JSON.stringify({ t: Date.now(), city: loc.city, region: loc.region, country: loc.country, code: loc.code }));
+  }catch(_e){}
+  return loc;
+}
+window.mmSaveLoc = mmSaveLoc;
+
+var MM_LOC_PROMISE = (function(){
+  function fromCache(){
+    try{
+      var o = JSON.parse(localStorage.getItem(MM_LOC_KEY) || 'null');
+      if(!o || typeof o !== 'object') return null;
+      var loc = mmCleanLoc(o);
+      return loc ? { age: Date.now() - (Number(o.t) || 0), loc: loc } : null;
+    }catch(_e){ return null; }
+  }
+  function timeout(p, ms){
+    return Promise.race([p, new Promise(function(res){ setTimeout(function(){ res(null); }, ms); })]);
+  }
+  function ask(url, read){
+    return timeout(fetch(url, { cache: 'no-store' })
+      .then(function(r){ return r && r.ok ? r.json() : null; })
+      .then(function(d){ return d ? mmCleanLoc(read(d)) : null; })
+      .catch(function(){ return null; }), MM_LOC_ONE);
+  }
+  var cached = fromCache();
+  if(MM_FRAMED) return Promise.resolve(null);   /* dashboard preview iframe: no lookup, no stats */
+  if(cached && cached.age < MM_LOC_TTL) return Promise.resolve(mmSaveLoc(cached.loc));  /* fresh enough: zero extra delay */
+  var chain = Promise.resolve(null);
+  MM_LOC_SERVICES.forEach(function(svc){
+    chain = chain.then(function(found){
+      if(found) return found;
+      return ask(svc[0], svc[1]);
+    });
+  });
+  return chain.then(function(loc){
+    if(loc) return mmSaveLoc(loc);
+    return mmSaveLoc(cached ? cached.loc : null);      /* stale cache beats nothing */
+  }, function(){ return cached ? mmSaveLoc(cached.loc) : null; });
+})();
+window.MM_LOC_PROMISE = MM_LOC_PROMISE;
+
+/* once the answer arrives late, still hand it to the database (one cheap extra row) */
+MM_LOC_PROMISE.then(function(loc){
+  try{
+    if(loc && MM_LOC_LATE && !MM_LOC_BACKFILL && !MM_FRAMED){
+      MM_LOC_BACKFILL = true;
+      mmTrack('location', { note: 'resolved after first events' });
+    }
+  }catch(_e){}
+});
+
 /* ---- traffic source names: always the full, recognizable place name ---- */
 function mmCanonicalSource(s){
   s = String(s || '').toLowerCase().trim().replace(/^www\./, '');
@@ -858,9 +958,27 @@ function mmTrack(event, meta){
       meta: (meta && typeof meta === 'object') ? meta : (meta ? { value: meta } : {}),
       path: mmCleanPath()
     };
-    /* wait for the (short, sequential) visitor id, then send */
-    return MM_VID_PROMISE.then(function(vid){
+    /* wait for the (short, sequential) visitor id + the visitor's city/country, then send.
+       The location is cached after the first lookup, so normally nothing waits at all.
+       A brand-new visitor is held at most MM_LOC_WAIT for it — after that the event goes
+       out without a city (visit counts never depend on the lookup), and the answer that
+       arrives late is stored by the follow-up 'location' row instead. */
+    var waitLoc = MM_LOC ? Promise.resolve(MM_LOC)
+      : Promise.race([MM_LOC_PROMISE, new Promise(function(res){ setTimeout(function(){ res(null); }, MM_LOC_WAIT); })]);
+    return Promise.all([MM_VID_PROMISE, waitLoc]).then(function(res){
+      var vid = res[0], loc = res[1] || MM_LOC;
       payload.visitor_id = vid || MM_VID || null;
+      if(loc){
+        var m = {};
+        for(var k in payload.meta){ m[k] = payload.meta[k]; }
+        if(loc.city) m.city = loc.city;
+        if(loc.region) m.region = loc.region;
+        if(loc.country) m.country = loc.country;
+        if(loc.code) m.country_code = loc.code;
+        payload.meta = m;
+      } else if(event !== 'location'){
+        MM_LOC_LATE++;                       /* location showed up too late for this one */
+      }
       return fetch(sbUrl + '/rest/v1/portfolio_events', {
         method: 'POST',
         headers: SB_MM.headers(),
