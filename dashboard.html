@@ -113,6 +113,12 @@ input[type=color]{padding:4px;height:42px;cursor:pointer}
 .msg-text{font-size:13.5px;white-space:pre-wrap;word-break:break-word}
 .msg-actions{margin-top:10px;display:flex;gap:8px;flex-wrap:wrap}
 pre.snip{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px 14px;font-family:var(--mono);font-size:12px;line-height:1.55;overflow-x:auto;margin-top:8px}
+/* visitor rows (analytics: who is reading the site, and from where) */
+.vrow{display:flex;align-items:center;gap:10px;flex-wrap:wrap;border:1px solid var(--line);border-radius:12px;padding:9px 12px;margin-bottom:8px;background:var(--panel2);font-size:13px}
+.vrow .vid{font-family:var(--mono);font-size:12px;color:var(--muted)}
+.vrow .loc{font-weight:700}
+.vrow .sub{color:var(--muted);font-size:12px}
+.vrow time{margin-left:auto;color:var(--muted);font-size:12px;white-space:nowrap}
 </style>
 </head>
 <body>
@@ -748,11 +754,19 @@ const ANALYTICS_SNIPPET = [
   "mmTrack('github_click',  { url: 'https://github.com/…' });  // GitHub button",
   "mmTrack('linkedin_click',{ url: 'https://linkedin.com/…' });",
   "mmTrack('contact_submit',{ email: 'visitor@mail.com' });",
-  "/* event names above are exactly the ones this dashboard counts. */"
+  "/* event names above are exactly the ones this dashboard counts. */",
+  "",
+  "/* 🌍 location: index.html also resolves the visitor's city + country from their IP",
+  "   (a free public lookup — no GPS, no permission prompt) and merges it into meta of",
+  "   every event, so the Analytics tab can show 'Cairo, Egypt' next to the visitor:",
+  "fetch('https://ipwho.is/').then(r => r.json()).then(function(d){",
+  "  if(d && d.success !== false) mmTrack('view', { source: 'direct', city: d.city, country: d.country, country_code: d.country_code });",
+  "}); */"
 ].join('\n');
 
 R.analytics = function(){
-  return '<h2>Analytics</h2><div class="desc">Visits, unique visitors, clicks & where people came from — reported by the live site, stored in Supabase.</div>'+
+  return '<h2>Analytics</h2><div class="desc">Visits, unique visitors, clicks, where people came from &amp; which city/country they are in — reported by the live site, stored in Supabase.</div>'+
+    '<div class="hint" style="margin-bottom:14px">🌍 Location is read from the visitor\'s IP address (city level, via a free public lookup). <b>No GPS and no location permission</b> are ever requested, no coordinates are stored, and the IP itself is never saved.</div>'+
     '<div class="chip-row" style="margin-bottom:14px"><button class="mini" data-act="analytics-refresh">↻ Refresh</button></div>'+
     '<div class="card" id="analyticsBody"><p style="color:var(--muted)">Loading analytics…</p></div>'+
     '<div class="card"><h3>Site wiring<span class="line"></span></h3>'+
@@ -775,6 +789,83 @@ async function fetchMessagesCount(){
   }catch(e){}
   return null;
 }
+/* =====================================================================
+   🌍 VISITOR LOCATION (city + country). The live site reads the visitor's IP
+   through a free public lookup — never GPS, never a permission prompt — and
+   stores only 'city' / 'country' in the event meta. This builds the same shape
+   get_analytics() returns, straight from raw event rows, so the panels work
+   even on a database that has not run the newest setup.sql yet.
+===================================================================== */
+function mmFlag(code){
+  code = String(code || '').toUpperCase().replace(/[^A-Z]/g, '');
+  if(code.length !== 2) return '🏳️';
+  return String.fromCodePoint(127397 + code.charCodeAt(0), 127397 + code.charCodeAt(1));
+}
+function mmLocText(city, country){ return [city, country].filter(Boolean).join(', '); }
+function mmTimeAgo(iso){
+  const t = Date.parse(iso);
+  if(!t) return '—';
+  const mins = Math.max(0, Math.round((Date.now() - t) / 60000));
+  if(mins < 1) return 'just now';
+  if(mins < 60) return mins + ' min ago';
+  const hrs = Math.round(mins / 60);
+  if(hrs < 24) return hrs + (hrs === 1 ? ' hour ago' : ' hours ago');
+  const days = Math.round(hrs / 24);
+  return days + (days === 1 ? ' day ago' : ' days ago');
+}
+function locationFromRows(rows){
+  const clean = v => { v = String(v == null ? '' : v).trim(); return v ? v.slice(0, 64) : ''; };
+  const cities = {}, countries = {}, visitors = {};
+  /* each event that carries a city/country adds itself to the three rollups */
+  const bump = (map, key, fresh, e) => {
+    const o = map[key] || (map[key] = Object.assign(fresh, { visits: 0, _v: {} }));
+    if(e.event === 'view') o.visits++;
+    if(e.visitor_id) o._v[e.visitor_id] = 1;
+    return o;
+  };
+  const plain = r => { const out = {}; for(const f in r){ if(f.charAt(0) !== '_') out[f] = r[f]; } return out; };
+  const finish = o => Object.keys(o).map(k => {
+    const out = plain(o[k]);
+    out.visitors = Object.keys(o[k]._v || {}).length;
+    return out;
+  }).sort((a, b) => (b.visitors - a.visitors) || (b.visits - a.visits));
+  (rows || []).forEach(e => {
+    const m = e.meta || {};
+    const city = clean(m.city), region = clean(m.region), country = clean(m.country), code = clean(m.country_code).toUpperCase();
+    const at = String(e.created_at || '');
+    if(city) bump(cities, city + '\u00a7' + country, { city: city, country: country, country_code: code }, e);
+    if(country){
+      const c = bump(countries, country, { country: country, country_code: code, cities: 0 }, e);
+      if(city && !c._seen){ c._seen = {}; }
+      if(city && c._seen && !c._seen[city]){ c._seen[city] = 1; c.cities++; }
+    }
+    /* per visitor: the newest known location + their own visit/event counts */
+    const vid = e.visitor_id || '(unknown)';
+    const v = visitors[vid] || (visitors[vid] = { visitor_id: vid, visits: 0, events: 0, city: '', region: '',
+      country: '', country_code: '', source: '', first_visit: '', last_seen: '', _src: {} });
+    v.events++;
+    if(!v.first_visit || at < v.first_visit) v.first_visit = at;
+    if(at > v.last_seen){
+      v.last_seen = at;
+      if(city || country){ v.city = city; v.region = region; v.country = country; v.country_code = code; }
+    }
+    if(e.event === 'view'){
+      v.visits++;
+      const src = clean(m.source) || 'direct';
+      v._src[src] = (v._src[src] || 0) + 1;
+    }
+  });
+  /* the source shown next to a visitor is the one they used most */
+  const people = Object.keys(visitors).map(k => {
+    const r = visitors[k], out = plain(r);
+    let top = '', best = 0;
+    for(const src in r._src){ if(r._src[src] > best){ best = r._src[src]; top = src; } }
+    if(top) out.source = top;
+    return out;
+  }).sort((a, b) => String(b.last_seen).localeCompare(String(a.last_seen))).slice(0, 40);
+  return { cities: finish(cities), countries: finish(countries), visitors: people };
+}
+
 /* compute the same shape as get_analytics() from raw rows */
 function analyticsFromRows(rows, days){
   const t = { view:0, unique_visitors:0, project_view:0, cv_download:0, github_click:0, linkedin_click:0, contact_submit:0 };
@@ -817,7 +908,9 @@ function analyticsFromRows(rows, days){
   const daily = Object.keys(perDay).sort().map(d => ({ date: d, visitors: perDay[d].v.size, events: perDay[d].n }));
   let top = null; for(const p in proj){ if(!top || proj[p] > top.views) top = { id: p, views: proj[p] }; }
   const sources = Object.keys(src).map(s => ({ source: s, visits: src[s] })).sort((a, b) => b.visits - a.visits).slice(0, 6);
-  return { days: days, totals: t, daily: daily, top_project: top, sources: sources };
+  const loc = locationFromRows(rows);       /* city + country come from the same rows */
+  return { days: days, totals: t, daily: daily, top_project: top, sources: sources,
+           cities: loc.cities, countries: loc.countries, visitors: loc.visitors };
 }
 
 async function loadAnalytics(){
@@ -833,6 +926,16 @@ async function loadAnalytics(){
       return;
     }
   }
+  /* an older get_analytics() has no location keys: read them from the raw events
+     instead, so the city / country panel never depends on the migration being run */
+  if(!Array.isArray(d.cities) || !Array.isArray(d.visitors)){
+    try{
+      const loc = locationFromRows(await fetchEventsRaw(30));
+      if(!Array.isArray(d.cities)) d.cities = loc.cities;
+      if(!Array.isArray(d.countries)) d.countries = loc.countries;
+      if(!Array.isArray(d.visitors)) d.visitors = loc.visitors;
+    }catch(e){}
+  }
   const t = d.totals || {};
   const cards = [
     ['👀 Visits', t.view],
@@ -843,6 +946,10 @@ async function loadAnalytics(){
     ['💼 LinkedIn clicks', t.linkedin_click],
     ['📝 Form submits', t.contact_submit]
   ];
+  /* 🌍 where visitors are: city + country resolved from the IP (never GPS) */
+  const cts = Array.isArray(d.countries) ? d.countries : [];
+  const cty = Array.isArray(d.cities) ? d.cities : [];
+  if(cts.length) cards.push(['🌍 Countries', cts.length]);
   const msgCount = (d.messages !== undefined && d.messages !== null) ? d.messages : await fetchMessagesCount();
   if(msgCount !== null) cards.push(['📨 Messages', msgCount]);
 
@@ -868,6 +975,33 @@ async function loadAnalytics(){
     '</div>').join('')
     : '<p style="color:var(--muted);font-size:13px">No sources recorded yet — new visits are tagged automatically (instagram / facebook / direct…).</p>';
 
+  /* 🌍 where visitors are: city + country resolved from the visitor's IP
+     (approximate, city level — no GPS and no location permission involved) */
+  const ppl = Array.isArray(d.visitors) ? d.visitors : [];
+  const maxLoc = Math.max(1, ...cty.map(c => c.visitors || 0));
+  const locHtml = cty.length ? cty.map(c =>
+    '<div style="display:flex;align-items:center;gap:10px;margin:7px 0">'+
+      '<span style="width:22px;font-size:15px;line-height:1">'+mmFlag(c.country_code)+'</span>'+
+      '<span style="width:150px;font-size:12.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+esc(mmLocText(c.city, c.country))+'">'+esc(c.city || c.country || '—')+'</span>'+
+      '<span style="flex:1;height:8px;border-radius:4px;background:var(--panel2);overflow:hidden;display:block"><span style="display:block;height:100%;width:'+Math.round(100*(c.visitors||0)/maxLoc)+'%;background:linear-gradient(90deg,var(--acc),transparent)"></span></span>'+
+      '<b style="min-width:26px;text-align:right" title="'+(c.visitors||0)+' visitor(s)' + (c.visits ? ', ' + (c.visits||0) + ' visit(s) in the last 30 days' : '')+'">'+(c.visitors||0)+'</b>'+
+      '<span style="min-width:96px;text-align:right;font-size:11.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+esc(c.country||'')+'">'+esc(c.country||'')+'</span>'+
+    '</div>').join('')
+    : '<p style="color:var(--muted);font-size:13px">No city / country saved yet — the live site adds it to every visit automatically (read from the IP address; the visitor is never asked for location). Events stored before this feature have no location.</p>';
+  const countryChips = cts.length ? '<div class="chip-row" style="margin-top:12px">'+cts.map(c =>
+      '<span class="badge" title="'+esc(c.country||'')+(c.visits ? ' — ' + c.visits + ' visits' : '')+'">'+mmFlag(c.country_code)+' '+esc(c.country||'?')+' · '+(c.visitors||0)+'</span>').join('')+'</div>' : '';
+  const when = s => { const t = Date.parse(s); return t ? new Date(t).toLocaleString() : ''; };
+  const visitorHtml = ppl.map(v => {
+    const tip = (v.first_visit ? 'First visit: ' + when(v.first_visit) : '') + (v.last_seen ? (v.first_visit ? '  ·  ' : '') + 'Last seen: ' + when(v.last_seen) : '');
+    return '<div class="vrow">'+
+      '<span class="vid">'+esc(v.visitor_id || '—')+'</span>'+
+      '<span class="loc">'+(v.country_code ? mmFlag(v.country_code)+' ' : '')+esc(mmLocText(v.city, v.country) || 'no location saved')+'</span>'+
+      '<span class="sub">from '+esc(v.source || 'direct')+'</span>'+
+      '<span class="sub">'+(v.visits||0)+' visit'+((v.visits||0) === 1 ? '' : 's')+(v.events ? ' · '+(v.events||0)+' event'+((v.events||0) === 1 ? '' : 's') : '')+'</span>'+
+      '<time title="'+esc(tip)+'">'+esc(mmTimeAgo(v.last_seen))+'</time>'+
+    '</div>';
+  }).join('');
+
   const emptyAll = totEv === 0 && !srcs.length;
   box.innerHTML =
     (mode === 'raw' ? '<div class="banner" style="margin-bottom:12px">ℹ️ Computed from raw events (the <code>get_analytics</code> RPC is unavailable — run the new <code>setup.sql</code> to enable server-side stats &amp; the messages count here).</div>' : '')+
@@ -876,6 +1010,10 @@ async function loadAnalytics(){
       :
     '<div class="row3" style="margin-bottom:14px">'+cards.map(c=>'<div class="stat"><span class="l">'+c[0]+'</span><span class="n">'+(c[1]===undefined||c[1]===null?'—':c[1])+'</span></div>').join('')+'</div>'+
     '<div class="card" style="margin-bottom:14px"><h3>Where visitors came from<span class="line"></span></h3>'+srcHtml+'</div>'+
+    '<div class="card" style="margin-bottom:14px"><h3>🌍 Where visitors are<span class="line"></span></h3>'+locHtml+countryChips+
+      '<p style="color:var(--muted);font-size:11.5px;margin-top:10px">City + country resolved from the visitor IP address — approximate by design (no GPS, no precise-location permission, no coordinates stored).</p>'+'</div>'+
+    (visitorHtml ? '<div class="card" style="margin-bottom:14px"><h3>Visitors<span class="line"></span></h3>'+visitorHtml+
+      '<p style="color:var(--muted);font-size:11.5px;margin-top:4px">Latest '+(ppl.length)+' visitor'+(ppl.length === 1 ? '' : 's')+' — id, where they are, where they came from, and when.</p></div>' : '')+
     '<div style="background:var(--panel2);border:1px solid var(--line);border-radius:14px;padding:14px 16px;margin-bottom:14px;font-size:13.5px">'+
       '🏆 <b>Most opened project:</b> ' + (top ? esc(top.id) + ' <span style="color:var(--muted);font-size:12.5px">(' + top.views + ' opens)</span>' : '<span style="color:var(--muted)">no project opens yet — click a project card on your site to test it</span>') +
     '</div>'+
@@ -1049,26 +1187,6 @@ main.addEventListener('click', async e => {
     }catch(e){
       b.disabled = false;
       if(/WRONG_PASSWORD/.test(e.message)){ flash('Session expired — please log in again', 'err'); doLogout(); }
-      else flash('Failed: ' + e.message, 'err');
-    }
-    return; }
-});
-</script>
-</body>
-</html>
-t });
-      if(ok === true) loadMessages(); else flash('Message not found', 'err');
-    }catch(e){
-      b.disabled = false;
-      if(/WRONG_PASSWORD/.test(e.message)){ flash('Session expired — please log in again', 'err'); doLogout(); }
-      else flash('Failed: ' + e.message, 'err');
-    }
-    return; }
-});
-</script>
-</body>
-</html>
-; }
       else flash('Failed: ' + e.message, 'err');
     }
     return; }
