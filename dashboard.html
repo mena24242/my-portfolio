@@ -1078,9 +1078,9 @@ async function loadAnalytics(){
     '<div class="row3" style="margin-bottom:14px">'+cards.map(c=>'<div class="stat"><span class="l">'+c[0]+'</span><span class="n">'+(c[1]===undefined||c[1]===null?'—':c[1])+'</span></div>').join('')+'</div>'+
     '<div class="card" style="margin-bottom:14px"><h3>Where visitors came from<span class="line"></span></h3>'+srcHtml+'</div>'+
     '<div class="card" style="margin-bottom:14px"><h3>🌍 Where visitors are<span class="line"></span></h3>'+locHtml+countryChips+
-      '<p style="color:var(--muted);font-size:11.5px;margin-top:10px">City + country resolved from the visitor IP address — approximate by design (no GPS, no precise-location permission, no coordinates stored).</p>'+'</div>'+
+      '<p style="color:var(--muted);font-size:11.5px;margin-top:10px">City + country are what the visitor\'s <b>IP address</b> is registered to — i.e. the city their ISP gateway sits in, not where the person is standing (a visitor in Asyut, Sohag or Minya usually shows as Cairo on Egyptian lines; VPN users show the VPN city). Approximate by design: no GPS, no precise-location permission, no coordinates stored. Hit <b>🔎 Test the location lookup</b> above to see the provider + ASN behind a reading.</p>'+'</div>'+
     (visitorHtml ? '<div class="card" style="margin-bottom:14px"><h3>Visitors<span class="line"></span></h3>'+visitorHtml+
-      '<p style="color:var(--muted);font-size:11.5px;margin-top:4px">Latest '+(ppl.length)+' visitor'+(ppl.length === 1 ? '' : 's')+' — id, where they are, where they came from, and when.</p></div>' : '')+
+      '<p style="color:var(--muted);font-size:11.5px;margin-top:4px">Latest '+(ppl.length)+' visitor'+(ppl.length === 1 ? '' : 's')+' — id, the city/country their IP belongs to, where they came from, and when.</p></div>' : '')+
     '<div style="background:var(--panel2);border:1px solid var(--line);border-radius:14px;padding:14px 16px;margin-bottom:14px;font-size:13.5px">'+
       '🏆 <b>Most opened project:</b> ' + (top ? esc(top.id) + ' <span style="color:var(--muted);font-size:12.5px">(' + top.views + ' opens)</span>' : '<span style="color:var(--muted)">no project opens yet — click a project card on your site to test it</span>') +
     '</div>'+

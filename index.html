@@ -810,29 +810,29 @@ var MM_LOC_SERVICES = [
   /* [url, reader] — each provider spells the fields differently, so map them here */
   ['https://ipwho.is/', function(d){
      if(d && d.success === false) return null;
-     return { city: d.city, region: d.region, country: d.country, code: d.country_code };
+     return { city: d.city, region: d.region, country: d.country, code: d.country_code, isp: d.connection && d.connection.isp, asn: d.connection && d.connection.asn };
    }],
   ['https://ipapi.co/json/', function(d){
      if(d && d.error) return null;
-     return { city: d.city, region: d.region, country: d.country_name, code: d.country_code };
+     return { city: d.city, region: d.region, country: d.country_name, code: d.country_code, isp: d.org, asn: d.asn };
    }],
   ['https://free.freeipapi.com/api/v1/json', function(d){
-     return { city: d.cityName, region: d.regionName, country: d.countryName, code: d.countryCode };
+     return { city: d.cityName, region: d.regionName, country: d.countryName, code: d.countryCode, isp: d.asnOrganization, asn: d.asn };
    }],
   ['https://api.ip.sb/geoip', function(d){
-     return { city: d.city, region: d.region, country: d.country, code: d.country_code };
+     return { city: d.city, region: d.region, country: d.country, code: d.country_code, isp: d.isp, asn: d.asn };
    }],
   ['https://get.geojs.io/v1/ip/geo.json', function(d){
-     return { city: d.city, region: d.region, country: d.country, code: d.country_code };
+     return { city: d.city, region: d.region, country: d.country, code: d.country_code, isp: d.organization };
    }],
   ['https://wtfismyip.com/json', function(d){
-     return { city: d.YourFuckingCity, country: d.YourFuckingCountry, code: d.YourFuckingCountryCode };
+     return { city: d.YourFuckingCity, country: d.YourFuckingCountry, code: d.YourFuckingCountryCode, isp: d.YourFuckingISP };
    }],
   /* last resort: country only (free tier has no city) - still far better than nothing */
   ['https://api.my-ip.io/v2/ip.json', function(d){
      if(!d || d.success === false) return null;
-     var c = d.country || {};
-     return { country: c.name, code: c.code };
+     var c = d.country || {}, a = d.asn || {};
+     return { country: c.name, code: c.code, isp: a.name, asn: a.number };
    }]
 ];
 var MM_LOC = null;            /* the location as soon as it is known (sync copy for other code) */
@@ -854,7 +854,8 @@ function mmCleanLoc(o){
     if(!v || v === '-' || /^(unknown|private|reserved|localhost|loopback|\[object)/i.test(v)) return '';
     return v.slice(0, 64);
   }
-  var loc = { city: one(o.city), region: one(o.region), country: one(o.country), code: one(o.code).toUpperCase().slice(0, 2) };
+  var loc = { city: one(o.city), region: one(o.region), country: one(o.country), code: one(o.code).toUpperCase().slice(0, 2),
+              isp: one(o.isp), asn: one(o.asn) };
   if(!loc.city && !loc.country) return null;
   return loc;
 }
@@ -867,7 +868,8 @@ function mmSaveLoc(loc, via){
   if(via != null) MM_LOC_VIA = String(via).replace(/^https?:\/\//, '').replace(/\/.*$/, '');
   if(!loc) return null;
   try{
-    localStorage.setItem(MM_LOC_KEY, JSON.stringify({ t: Date.now(), city: loc.city, region: loc.region, country: loc.country, code: loc.code, via: MM_LOC_VIA }));
+    localStorage.setItem(MM_LOC_KEY, JSON.stringify({ t: Date.now(), city: loc.city, region: loc.region, country: loc.country, code: loc.code,
+                                                        isp: loc.isp, asn: loc.asn, via: MM_LOC_VIA }));
   }catch(_e){}
   return loc;
 }
@@ -1063,7 +1065,9 @@ window.mmTrack = mmTrack;
       var ok = null;
       list.forEach(function(r){ if(r.loc && !ok) ok = r; });
       if(ok) mmSaveLoc(ok.loc, ok.url);
-      line = '🌍 <b>location: ' + (ok ? mmLocLabel(ok.loc) : 'NO ANSWER') + '</b><br>' +
+      line = '🌍 <b>location: ' + (ok ? mmLocLabel(ok.loc) : 'NO ANSWER') + '</b>' +
+        (ok && (ok.loc.isp || ok.loc.asn) ? ' <span style="opacity:.7">via ' + [ok.loc.isp, ok.loc.asn ? 'AS' + String(ok.loc.asn).replace(/^AS/i, '') : ''].filter(Boolean).join(' ') + '</span>' : '') + '<br>' +
+        (ok ? '<span style="opacity:.7">this is the city your traffic EXITS from (your ISP gateway) — not a device position, so a visitor in Asyut or Sohag can read as Cairo. Never a GPS coordinate.</span><br>' : '') +
         list.map(function(r){
           return (r.loc ? '✅' : '❌') + ' ' + r.url.replace(/^https?:\/\//, '').replace(/\/.*$/, '') +
                  ' → ' + (r.loc ? mmLocLabel(r.loc) : (r.err || 'failed'));
