@@ -627,6 +627,74 @@ as $$
                 order by cnt desc
                 limit 6) s),
       '[]'::jsonb) as j
+  ),
+  /* ---- location: the site resolves the visitor IP to a CITY + COUNTRY (no GPS,
+     no browser permission) and stores them in meta of the events it sends.
+     Read from meta only, so this works with or without the extra columns. ---- */
+  loc as (
+    select e.created_at,
+           e.event,
+           coalesce(e.visitor_id, 'anon')                      as visitor_id,
+           nullif(coalesce(e.meta ->> 'city', ''), '')         as city,
+           nullif(coalesce(e.meta ->> 'country', ''), '')      as country,
+           nullif(coalesce(e.meta ->> 'country_code', ''), '') as country_code
+      from ev e
+     where nullif(coalesce(e.meta ->> 'city', ''), '') is not null
+        or nullif(coalesce(e.meta ->> 'country', ''), '') is not null
+  ),
+  cities as (
+    select coalesce(
+      (select jsonb_agg(x order by x.visitors desc, x.visits desc) from (
+         select l.city                                        as city,
+                l.country                                     as country,
+                max(l.country_code)                           as country_code,
+                count(distinct l.visitor_id)                  as visitors,
+                count(*) filter (where l.event = 'view')      as visits
+           from loc l
+          where l.city is not null
+          group by l.city, l.country
+          limit 12) x),
+      '[]'::jsonb) as j
+  ),
+  countries as (
+    select coalesce(
+      (select jsonb_agg(x order by x.visitors desc, x.visits desc) from (
+         select l.country                                       as country,
+                max(l.country_code)                             as country_code,
+                count(distinct l.visitor_id)                     as visitors,
+                count(*) filter (where l.event = 'view')        as visits,
+                count(distinct l.city)                           as cities
+           from loc l
+          where l.country is not null
+          group by l.country
+          limit 12) x),
+      '[]'::jsonb) as j
+  ),
+  /* one row per visitor: what the dashboard lists as "Visitors" - city + country
+     is the most recent one that visitor was seen in */
+  visitors as (
+    select coalesce(
+      (select jsonb_agg(x order by x.last_seen desc) from (
+         select coalesce(e.visitor_id, '(unknown)')                      as visitor_id,
+                (array_agg(e.meta ->> 'city' order by e.created_at desc)
+                   filter (where nullif(coalesce(e.meta ->> 'city', ''), '') is not null))[1]            as city,
+                (array_agg(e.meta ->> 'region' order by e.created_at desc)
+                   filter (where nullif(coalesce(e.meta ->> 'region', ''), '') is not null))[1]          as region,
+                (array_agg(e.meta ->> 'country' order by e.created_at desc)
+                   filter (where nullif(coalesce(e.meta ->> 'country', ''), '') is not null))[1]         as country,
+                (array_agg(e.meta ->> 'country_code' order by e.created_at desc)
+                   filter (where nullif(coalesce(e.meta ->> 'country_code', ''), '') is not null))[1]    as country_code,
+                count(*) filter (where e.event = 'view')                 as visits,
+                count(*)                                                 as events,
+                min(e.created_at) filter (where e.event = 'view')         as first_visit,
+                max(e.created_at)                                        as last_seen,
+                mode() within group (order by public.pb_event_source(e.meta, e.path))
+                  filter (where e.event = 'view')                        as source
+           from ev e
+          group by coalesce(e.visitor_id, '(unknown)')
+          order by max(e.created_at) desc
+          limit 40) x),
+      '[]'::jsonb) as j
   )
   select jsonb_build_object(
     'days',        coalesce(p_days, 30),
@@ -634,6 +702,9 @@ as $$
     'daily',       (select j from daily),
     'top_project', (select j from top),
     'sources',     (select j from sources),
+    'cities',      (select j from cities),
+    'countries',   (select j from countries),
+    'visitors',    (select j from visitors),
     'messages',    (select count(*) from public.portfolio_messages)
   );
 $$;
@@ -663,6 +734,10 @@ grant execute on function public.update_message(text, bigint, text)   to anon, a
 -- =====================================================================
 --  PART G - VISITOR DATA MADE READABLE (one-time cleanup + views + retention)
 -- =====================================================================
+--  RULE for the views below: they already exist in live projects, and
+--  CREATE OR REPLACE VIEW may only ADD columns AT THE END (renaming, reordering or
+--  inserting in the middle aborts the whole script with
+--  "cannot change name of view column ..."). Any new field goes after the last one.
 
 -- 1) one-time hygiene for OLD rows (every statement below is a no-op once done)
 --    ORDER MATTERS: derive the source from the path BEFORE stripping fbclid from it
@@ -692,7 +767,17 @@ select
   count(*) filter (where event = 'project_view')             as project_opens,
   count(*) filter (where event in ('cv_download', 'download_cv')) as cv_downloads,
   count(*) filter (where event in ('contact_submit', 'generate_lead')) as form_submits,
-  count(*)                                                   as total_events
+  count(*)                                                   as total_events,
+  /* where this visitor is: city / country resolved from their IP address (approximate,
+     city level, no GPS is ever used). Latest known value wins. NOTE: appended at the END
+     on purpose - CREATE OR REPLACE VIEW may add columns but never reorder or rename
+     existing ones, and this view already exists in live projects. */
+  (array_agg(meta ->> 'city'        order by created_at desc) filter (where nullif(coalesce(meta ->> 'city', ''), '') is not null))[1]        as city,
+  (array_agg(meta ->> 'country'     order by created_at desc) filter (where nullif(coalesce(meta ->> 'country', ''), '') is not null))[1]     as country,
+  (array_agg(meta ->> 'country_code' order by created_at desc) filter (where nullif(coalesce(meta ->> 'country_code', ''), '') is not null))[1] as country_code,
+  nullif(concat_ws(', ',
+    (array_agg(meta ->> 'city'    order by created_at desc) filter (where nullif(coalesce(meta ->> 'city', ''), '') is not null))[1],
+    (array_agg(meta ->> 'country' order by created_at desc) filter (where nullif(coalesce(meta ->> 'country', ''), '') is not null))[1]), '') as location
 from public.portfolio_events
 group by coalesce(visitor_id, '(unknown)');
 
@@ -716,6 +801,7 @@ select
   created_at                                                             as time,
   case event
     when 'view'           then 'Visited the site'
+    when 'location'       then 'Located in ' || coalesce(nullif(concat_ws(', ', nullif(meta ->> 'city', ''), nullif(meta ->> 'country', '')), ''), '?')
     when 'project_view'   then 'Opened project: ' || coalesce(meta ->> 'project', meta ->> 'title', '?')
     when 'cv_download'    then 'Downloaded CV'
     when 'download_cv'    then 'Downloaded CV'
@@ -733,11 +819,14 @@ select
       where v.visitor_id = portfolio_events.visitor_id and v.event = 'view'),
     public.pb_event_source(meta, path))                                  as source,
   coalesce(meta ->> 'project', meta ->> 'title', meta ->> 'url', meta ->> 'email', '') as details,
-  path
+  path,
+  /* city + country from the visitor IP (no GPS). Empty for rows saved before the
+     location feature was installed. Appended last - see the site_visitors note. */
+  nullif(concat_ws(', ', nullif(meta ->> 'city', ''), nullif(meta ->> 'country', '')), '') as location
 from public.portfolio_events
 order by created_at desc;
 
-comment on view public.site_visitors       is 'One row per visitor: visits, first/last seen, main traffic source, actions';
+comment on view public.site_visitors       is 'One row per visitor: visits, first/last seen, main traffic source, city + country, actions';
 comment on view public.site_traffic_daily  is 'One row per day: visitors, visits, opens, downloads, clicks, form submits';
 comment on view public.site_events_log     is 'Every visitor event in plain English, newest first';
 comment on function public.pb_event_source(jsonb, text) is 'Traffic source for one event (meta.source, utm_source, fbclid or direct)';
@@ -775,6 +864,87 @@ exception
   when others then raise notice 'retention not scheduled (%) - events are kept forever', sqlerrm;
 end $$;
 
+-- =====================================================================
+--  PART H - VISITOR LOCATION (approximate city + country, from the IP address)
+-- =====================================================================
+--  How it works: index.html asks a free public IP-geolocation service for the
+--  visitor's city/country and writes them into the `meta` of the events it already
+--  sends to portfolio_events. No GPS and no browser location permission is used
+--  (nothing is ever asked from the visitor), no coordinates are stored, and the IP
+--  address itself is never saved -- city level only.
+--  Collecting the data needs NOTHING from this part (meta holds it all); these
+--  additions just make it comfortable to read in Supabase -> Table Editor.
+--  Rows written before this feature existed have no city: the IP was never
+--    stored, so old rows cannot be looked up retroactively.
+
+-- 1) expose the meta keys as real, readable columns.
+--    Generated columns can never drift from `meta`, and the insert the site makes
+--    stays exactly as it was (it only ever writes meta).
+do $$
+declare col text;
+begin
+  foreach col in array array['city', 'country', 'country_code'] loop
+    if not exists (
+      select 1 from information_schema.columns
+       where table_schema = 'public' and table_name = 'portfolio_events' and column_name = col
+    ) then
+      execute format(
+        'alter table public.portfolio_events add column %I text generated always as ( nullif(meta ->> %L, %L) ) stored',
+        col, col, '');
+      raise notice 'portfolio_events.% added (read straight from meta)', col;
+    end if;
+  end loop;
+exception
+  when others then
+    raise notice 'location columns skipped (%) -- the dashboard reads them from meta anyway', sqlerrm;
+end $$;
+
+-- 2) rollups, so the Table Editor shows the same picture as the dashboard
+create or replace view public.site_traffic_by_country as
+select
+  coalesce(nullif(meta ->> 'country', ''), '(unknown)')                 as country,
+  max(nullif(meta ->> 'country_code', ''))                              as country_code,
+  count(distinct coalesce(visitor_id, '(unknown)'))                     as visitors,
+  count(*) filter (where event = 'view')                                as visits,
+  count(*) filter (where event = 'project_view')                        as project_opens,
+  count(*) filter (where event in ('cv_download', 'download_cv'))       as cv_downloads,
+  count(*) filter (where event in ('contact_submit', 'generate_lead'))  as form_submits,
+  min(created_at)                                                       as first_seen,
+  max(created_at)                                                       as last_seen
+from public.portfolio_events
+group by coalesce(nullif(meta ->> 'country', ''), '(unknown)');
+
+create or replace view public.site_traffic_by_city as
+select
+  nullif(meta ->> 'city', '')                                           as city,
+  coalesce(nullif(meta ->> 'country', ''), '(unknown)')                as country,
+  max(nullif(meta ->> 'country_code', ''))                              as country_code,
+  count(distinct coalesce(visitor_id, '(unknown)'))                     as visitors,
+  count(*) filter (where event = 'view')                                as visits,
+  max(created_at)                                                       as last_seen
+from public.portfolio_events
+where nullif(coalesce(meta ->> 'city', ''), '') is not null
+group by nullif(meta ->> 'city', ''), coalesce(nullif(meta ->> 'country', ''), '(unknown)');
+
+comment on view public.site_traffic_by_country is 'Visitors grouped by country (city-level IP lookup, no GPS)';
+comment on view public.site_traffic_by_city    is 'Visitors grouped by city + country (city-level IP lookup, no GPS)';
+
+-- same lock as the other readable views: Table Editor only, not the public API
+revoke select on public.site_traffic_by_country, public.site_traffic_by_city
+  from anon, authenticated, public;
+
+-- 3) one index that keeps the location rollups quick on a growing log
+do $$
+begin
+  create index if not exists portfolio_events_location_idx
+    on public.portfolio_events (lower(coalesce(nullif(meta ->> 'country', ''), '(unknown)')));
+exception
+  when others then raise notice 'location index skipped (%)', sqlerrm;
+end $$;
+
+-- =====================================================================
+--  WHAT YOU GET (printed once, at the end of the run)
+-- =====================================================================
 do $$
 declare r int;
 begin
@@ -790,6 +960,9 @@ begin
   raise notice 'portfolio (view)    : content size = % chars',
               length((select content::text from public.portfolio where id = 'main'));
   raise notice 'site_visitors       : % visitors tracked', (select count(*) from public.site_visitors);
+  raise notice 'visitor locations   : % of % visitors have a city + country',
+              (select count(*) from public.site_visitors where nullif(location, '') is not null),
+              (select count(*) from public.site_visitors);
   raise notice 'portfolio_events    : % events (older than 180 days auto-deleted daily)', (select count(*) from public.portfolio_events);
   raise notice 'Open Supabase -> Table Editor to see the new tables.';
   raise notice '------------------------------------------';
