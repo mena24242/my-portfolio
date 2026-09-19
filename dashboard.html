@@ -709,8 +709,17 @@ R.design = function(){
     '</div>';
 };
 R.settings = function(){
-  const sec = CONTENT.settings.sections || {};
+  const sec = (CONTENT.settings && CONTENT.settings.sections) || {};
   const keys = ['about','education','experience','services','skills','projects','certifications','testimonials','contact'];
+  const SEC_LABELS = {
+    about:'About — عن نفسي', education:'Education — التعليم', experience:'Experience — الخبرات',
+    services:'Services — الخدمات', skills:'Skills — المهارات', projects:'Projects — المشاريع',
+    certifications:'Certifications — الشهادات', testimonials:'Testimonials — آراء الناس', contact:'Contact — التواصل'
+  };
+  /* one switch per section — missing keys default to visible (index.html treats only `false` as hidden) */
+  const secRows = keys.map(k =>
+    '<label class="switch-row"><input type="checkbox" data-bool="settings.sections.'+k+'"'+(sec[k]!==false?' checked':'')+'><span>'+(SEC_LABELS[k] || k)+'</span></label>'
+  ).join('');
   return '<h2>Settings</h2><div class="desc">Appearance, visibility, password & backups.</div>'+
     '<div class="card"><h3>Appearance<span class="line"></span></h3><p style="color:var(--muted);font-size:13px">Theme, colors, fonts, animations, layout, navbar, background, cards & buttons كلها اتنقلت لتبويب <b>🎨 Portfolio Control</b>. لون الـ Accent القديم هنا اتمنع — قيمته اتندمجت تلقائيًا في الإعدادات الجديدة.</p></div>'+
     '<div class="card"><h3>CV link<span class="line"></span></h3>'+
@@ -720,7 +729,8 @@ R.settings = function(){
       '<div class="row">'+field('Google Analytics 4 ID','settings.gtagId',{ph:'G-XXXXXXXXXX'})+field('Meta Pixel ID','settings.metaPixelId',{ph:'123456789012345'})+'</div>'+
       field('Web3Forms access key','settings.web3formsKey',{ph:'60002f5f-…',hint:'مفتاح فورم التواصل — الرسايل بتوصلك على الإيميل وتتخزن في Supabase'})+
       '<div class="hint">سيبها فاضية لو مش مستخدمها. القيم دي بتترجّع تلقائيًا على <code>index.html</code> بعد الـ Save.</div></div>'+
-    '<div class="card"><h3>Section visibility<span class="line"></span></h3>'+secRows+'</div>'+
+    '<div class="card"><h3>Section visibility<span class="line"></span></h3>'+secRows+
+      '<div class="hint" style="margin-top:8px">الـ toggles دي بتخفي القسم من الموقع ومن لينك الناف بار بتاعه. متنساش تعمل <b>Save to Supabase</b> بعد أي تعديل.</div></div>'+
     '<div class="card"><h3>Change password<span class="line"></span></h3><div class="row"><div class="f"><label>New password (min 4 chars)</label><input id="newPass" type="text"></div><div class="f"><label>Repeat</label><input id="newPass2" type="text"></div></div><button class="mini" data-act="change-pass">Change password</button><div class="hint">Stored hashed in Supabase (table portfolio_auth).</div></div>'+
     '<div class="card"><h3>Data<span class="line"></span></h3>'+
       '<p style="color:var(--muted);font-size:13px;margin-bottom:12px">Current content size: <b>'+fmtSize(contentSize())+'</b>'+(contentSize() > 4*1048576 ? ' — ⚠️ large; consider fewer/lighter images' : '')+'. Last saved: '+(lastSaved ? new Date(lastSaved).toLocaleString() : '—')+'</p>'+
@@ -1158,9 +1168,16 @@ async function loadMessages(){
 function renderTab(tab){
   currentTab = tab;
   document.querySelectorAll('#tabs .tab').forEach(b=> b.classList.toggle('active', b.dataset.tab === tab));
-  document.getElementById('main').innerHTML = R[tab] ? R[tab]() : '';
+  const mainEl = document.getElementById('main');
+  try{ mainEl.innerHTML = R[tab] ? R[tab]() : ''; }
+  catch(err){
+    /* one broken renderer must not leave a blank, dead-looking tab with no explanation */
+    console.error('renderTab(' + tab + ') failed:', err);
+    mainEl.innerHTML = '<h2>'+esc(tab)+'</h2><div class="banner">⚠️ This tab could not be rendered: '+esc(err && err.message)+' — التفاصيل في الـ Console.</div>';
+    return;
+  }
   window.scrollTo(0,0);
-  if(tab === 'preview'){ const fr = document.getElementById('previewFrame'); fr.onload = pushPreview; }
+  if(tab === 'preview'){ const fr = document.getElementById('previewFrame'); if(fr) fr.onload = pushPreview; }
   if(tab === 'analytics'){ loadAnalytics(); loadLocCheck(); }
   if(tab === 'messages') loadMessages();
 }
