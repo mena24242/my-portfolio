@@ -819,20 +819,39 @@ var MM_LOC_SERVICES = [
   ['https://free.freeipapi.com/api/v1/json', function(d){
      return { city: d.cityName, region: d.regionName, country: d.countryName, code: d.countryCode };
    }],
+  ['https://api.ip.sb/geoip', function(d){
+     return { city: d.city, region: d.region, country: d.country, code: d.country_code };
+   }],
   ['https://get.geojs.io/v1/ip/geo.json', function(d){
      return { city: d.city, region: d.region, country: d.country, code: d.country_code };
+   }],
+  ['https://wtfismyip.com/json', function(d){
+     return { city: d.YourFuckingCity, country: d.YourFuckingCountry, code: d.YourFuckingCountryCode };
+   }],
+  /* last resort: country only (free tier has no city) - still far better than nothing */
+  ['https://api.my-ip.io/v2/ip.json', function(d){
+     if(!d || d.success === false) return null;
+     var c = d.country || {};
+     return { country: c.name, code: c.code };
    }]
 ];
 var MM_LOC = null;            /* the location as soon as it is known (sync copy for other code) */
 var MM_LOC_LATE = 0;          /* events that had to go out before the lookup was done */
 var MM_LOC_BACKFILL = false;  /* the late location was already pushed as its own row */
+var MM_LOC_VIA = '';          /* which service answered (also kept in the local cache) */
+var MM_LOC_ERR = '';          /* why nothing answered: '' | 'blocked' | 'no-data' */
+var MM_LOC_DEBUG = false;      /* turned on by ?mmloc on the live site - see mmLocCheck() */
+function mmLocNote(msg){ try{ (MM_LOC_DEBUG ? console.warn : console.info)('[analytics] ' + msg); }catch(_e){} }
 
 /* keep only the readable, coarse pieces (and never junk like "unknown") */
 function mmCleanLoc(o){
   if(!o || typeof o !== 'object') return null;
   function one(v){
+    /* a provider that starts returning an object/array for a field must not put
+       "[object Object]" into the database — only plain text is accepted */
+    if(typeof v !== 'string' && typeof v !== 'number') return '';
     v = String(v == null ? '' : v).replace(/[<>]/g, '').trim();
-    if(!v || v === '-' || /^(unknown|private|reserved|localhost|loopback)$/i.test(v)) return '';
+    if(!v || v === '-' || /^(unknown|private|reserved|localhost|loopback|\[object)/i.test(v)) return '';
     return v.slice(0, 64);
   }
   var loc = { city: one(o.city), region: one(o.region), country: one(o.country), code: one(o.code).toUpperCase().slice(0, 2) };
@@ -840,16 +859,43 @@ function mmCleanLoc(o){
   return loc;
 }
 
-function mmSaveLoc(loc){
+function mmLocLabel(loc){ return loc ? ([loc.city, loc.country].filter(Boolean).join(', ') || '—') : '—'; }
+
+function mmSaveLoc(loc, via){
   MM_LOC = loc || null;
   window.MM_LOC = MM_LOC;
+  if(via != null) MM_LOC_VIA = String(via).replace(/^https?:\/\//, '').replace(/\/.*$/, '');
   if(!loc) return null;
   try{
-    localStorage.setItem(MM_LOC_KEY, JSON.stringify({ t: Date.now(), city: loc.city, region: loc.region, country: loc.country, code: loc.code }));
+    localStorage.setItem(MM_LOC_KEY, JSON.stringify({ t: Date.now(), city: loc.city, region: loc.region, country: loc.country, code: loc.code, via: MM_LOC_VIA }));
   }catch(_e){}
   return loc;
 }
 window.mmSaveLoc = mmSaveLoc;
+
+/* one service -> { loc, err }. It NEVER rejects: a request killed by an ad blocker has to
+   leave the next service in the list a chance (a rejected fetch used to stop the whole chain). */
+function mmAskLoc(url, read){
+  return fetch(url, { cache: 'no-store' })
+    .then(function(r){ return r && r.ok ? r.json() : null; })
+    .then(function(d){
+      var loc = d ? mmCleanLoc(read(d)) : null;
+      return { loc: loc, err: loc ? '' : (d ? 'no-data' : 'empty-response') };
+    })
+    .catch(function(e){ return { loc: null, err: (e && e.name) || 'blocked' }; });
+}
+function mmLocDeadline(ms){
+  return new Promise(function(res){ setTimeout(function(){ res({ loc: null, err: 'timeout' }); }, ms); });
+}
+/* ask every service once, in parallel, and report each answer - used by the ?mmloc self test
+   (the dashboard's "location check" mirrors the same list - keep both in sync) */
+function mmLocProbe(){
+  return Promise.all(MM_LOC_SERVICES.map(function(svc){
+    return Promise.race([mmAskLoc(svc[0], svc[1]), mmLocDeadline(MM_LOC_ONE)])
+      .then(function(res){ return { url: svc[0], loc: res.loc, err: res.loc ? '' : (res.err || 'failed') }; });
+  }));
+}
+window.mmLocProbe = mmLocProbe;
 
 var MM_LOC_PROMISE = (function(){
   function fromCache(){
@@ -857,32 +903,42 @@ var MM_LOC_PROMISE = (function(){
       var o = JSON.parse(localStorage.getItem(MM_LOC_KEY) || 'null');
       if(!o || typeof o !== 'object') return null;
       var loc = mmCleanLoc(o);
-      return loc ? { age: Date.now() - (Number(o.t) || 0), loc: loc } : null;
+      return loc ? { age: Date.now() - (Number(o.t) || 0), loc: loc, via: o.via || '' } : null;
     }catch(_e){ return null; }
-  }
-  function timeout(p, ms){
-    return Promise.race([p, new Promise(function(res){ setTimeout(function(){ res(null); }, ms); })]);
-  }
-  function ask(url, read){
-    return timeout(fetch(url, { cache: 'no-store' })
-      .then(function(r){ return r && r.ok ? r.json() : null; })
-      .then(function(d){ return d ? mmCleanLoc(read(d)) : null; })
-      .catch(function(){ return null; }), MM_LOC_ONE);
   }
   var cached = fromCache();
   if(MM_FRAMED) return Promise.resolve(null);   /* dashboard preview iframe: no lookup, no stats */
-  if(cached && cached.age < MM_LOC_TTL) return Promise.resolve(mmSaveLoc(cached.loc));  /* fresh enough: zero extra delay */
+  if(MM_LOC_DEBUG){                             /* ?mmloc forces a fresh look, and talks */
+    try{ localStorage.removeItem(MM_LOC_KEY); }catch(_e){}
+    cached = null;
+  }
+  if(cached && cached.age < MM_LOC_TTL){       /* fresh enough: zero extra delay, zero traffic */
+    mmLocNote('location from cache: ' + mmLocLabel(cached.loc) + (cached.via ? ' (via ' + cached.via + ', ' + Math.round(cached.age / 36e5) + 'h ago)' : ''));
+    return Promise.resolve(mmSaveLoc(cached.loc, cached.via));
+  }
+  var tried = [];
   var chain = Promise.resolve(null);
   MM_LOC_SERVICES.forEach(function(svc){
-    chain = chain.then(function(found){
-      if(found) return found;
-      return ask(svc[0], svc[1]);
+    chain = chain.then(function(hit){
+      if(hit) return hit;
+      return Promise.race([mmAskLoc(svc[0], svc[1]), mmLocDeadline(MM_LOC_ONE)]).then(function(res){
+        if(res && res.loc) return { loc: res.loc, via: svc[0] };
+        tried.push(svc[0].replace(/^https?:\/\//, '').replace(/\/.*$/, '') + ':' + ((res && res.err) || 'failed'));
+        return null;
+      });
     });
   });
-  return chain.then(function(loc){
-    if(loc) return mmSaveLoc(loc);
-    return mmSaveLoc(cached ? cached.loc : null);      /* stale cache beats nothing */
-  }, function(){ return cached ? mmSaveLoc(cached.loc) : null; });
+  return chain.then(function(hit){
+    if(hit){ MM_LOC_ERR = ''; mmLocNote('location: ' + mmLocLabel(hit.loc) + ' (via ' + hit.via.replace(/^https?:\/\//, '') + ')'); return mmSaveLoc(hit.loc, hit.via); }
+    MM_LOC_ERR = 'blocked';
+    /* a null city in the database means THIS line ran: the visit was still counted, only the
+       location service was unreachable (ad blocker / privacy extension / VPN / offline ISP) */
+    try{ console.warn('[analytics] no visitor location - all ' + MM_LOC_SERVICES.length + ' IP services failed (' + tried.join(', ') + '). Visits and clicks are still recorded, only city/country is missing. Add ?mmloc to the page URL to test them one by one.'); }catch(_e){}
+    return mmSaveLoc(cached ? cached.loc : null, cached ? cached.via : null);   /* stale cache beats nothing */
+  }, function(){
+    MM_LOC_ERR = 'error';
+    return mmSaveLoc(cached ? cached.loc : null, cached ? cached.via : null);
+  });
 })();
 window.MM_LOC_PROMISE = MM_LOC_PROMISE;
 
@@ -990,6 +1046,41 @@ function mmTrack(event, meta){
   }
 }
 window.mmTrack = mmTrack;
+
+/* ---- ?mmloc  →  on-page self test for this very feature (normal visitors never
+   see it: the block only runs when the address contains ?mmloc). It shows whether the
+   IP lookup answers in THIS browser, and writes one test row so the dashboard lights up. */
+(function(){
+  try{
+    if(!/[?&]mmloc\b/.test(location.search || '')) return;
+    MM_LOC_DEBUG = true; window.MM_LOC_DEBUG = true;
+    var el = document.createElement('div');
+    el.setAttribute('style', 'position:fixed;right:14px;bottom:14px;z-index:99999;max-width:360px;background:#0b1220;color:#e2e8f0;border:1px solid #334155;border-radius:12px;padding:12px 14px;font:12.5px/1.55 ui-monospace,Menlo,Consolas,monospace;box-shadow:0 12px 34px rgba(0,0,0,.5)');
+    (document.body || document.documentElement).appendChild(el);
+    var line = '🌍 location test: probing ' + MM_LOC_SERVICES.length + ' services…', paint = function(){ el.innerHTML = line; };
+    paint();
+    MM_LOC_PROMISE.then(mmLocProbe).then(function(list){
+      var ok = null;
+      list.forEach(function(r){ if(r.loc && !ok) ok = r; });
+      if(ok) mmSaveLoc(ok.loc, ok.url);
+      line = '🌍 <b>location: ' + (ok ? mmLocLabel(ok.loc) : 'NO ANSWER') + '</b><br>' +
+        list.map(function(r){
+          return (r.loc ? '✅' : '❌') + ' ' + r.url.replace(/^https?:\/\//, '').replace(/\/.*$/, '') +
+                 ' → ' + (r.loc ? mmLocLabel(r.loc) : (r.err || 'failed'));
+        }).join('<br>') + '<br>' +
+        (ok ? 'cached for 6h + writing a test row…'
+             : 'nothing reachable from this browser — uBlock / Brave / Firefox ETP / a VPN usually eats these hosts. Visits are still counted, only the city is missing.') +
+        (MM_FRAMED ? '<br>⚠️ you are inside a preview iframe: tracking is skipped here by design — open the page itself.' : '');
+      paint();
+      if(ok && !MM_FRAMED){
+        Promise.resolve(mmTrack('location', { note: 'mmloc self test' })).then(function(){
+          line += '<br>✅ test row sent — refresh the dashboard Analytics tab (or Supabase → portfolio_events).';
+          paint();
+        });
+      }
+    }, function(e){ line = '🌍 location test crashed: ' + e; paint(); });
+  }catch(_e){}
+})();
 
 /* count a real visit once per 30 minutes per visitor (refreshes don't inflate stats) */
 try{

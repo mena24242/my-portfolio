@@ -734,6 +734,68 @@ R.preview = function(){
     '<iframe class="preview-frame" id="previewFrame" src="'+src+'"></iframe>';
 };
 
+/* =====================================================================
+   🌍 LOCATION CHECK — mirrors the provider list in index.html (keep both in sync).
+   A null city means one of two things, and this panel says which:
+     • the row predates the deploy (no location was ever written), or
+     • this browser blocks the IP services (uBlock / Brave / Firefox ETP / VPN).
+===================================================================== */
+const MM_LOC_SERVICES = [
+  ['ipwho.is',     'https://ipwho.is/',                        d => (d && d.success === false) ? null : { city: d.city, country: d.country, code: d.country_code }],
+  ['ipapi.co',     'https://ipapi.co/json/',                   d => (d && d.error) ? null : { city: d.city, country: d.country_name, code: d.country_code }],
+  ['freeipapi.com','https://free.freeipapi.com/api/v1/json',   d => ({ city: d.cityName, country: d.countryName, code: d.countryCode })],
+  ['api.ip.sb',    'https://api.ip.sb/geoip',                  d => ({ city: d.city, country: d.country, code: d.country_code })],
+  ['geojs.io',     'https://get.geojs.io/v1/ip/geo.json',      d => ({ city: d.city, country: d.country, code: d.country_code })],
+  ['wtfismyip',    'https://wtfismyip.com/json',               d => ({ city: d.YourFuckingCity, country: d.YourFuckingCountry, code: d.YourFuckingCountryCode })],
+  ['api.my-ip.io', 'https://api.my-ip.io/v2/ip.json',         d => (!d || d.success === false) ? null : { city: '', country: (d.country || {}).name, code: (d.country || {}).code }]
+];
+function mmAskService(url, read, ms){
+  const p = fetch(url, { cache: 'no-store' })
+    .then(r => (r && r.ok) ? r.json() : null)
+    .then(d => {
+      let loc = null;
+      try{ loc = d ? read(d) : null; }catch(e){ loc = null; }
+      if(!loc) return { ok: false, err: 'no answer' };
+      const txt = [loc.city, loc.country].map(v => (typeof v === 'string' || typeof v === 'number') ? String(v).trim() : '')
+        .filter(Boolean).join(', ');
+      return txt ? { ok: true, txt: txt } : { ok: false, err: 'no city data' };
+    })
+    .catch(e => ({ ok: false, err: ((e && e.name) || 'failed') + ' — usually blocked by an ad blocker' }));
+  return Promise.race([p, new Promise(res => setTimeout(() => res({ ok: false, err: 'timeout' }), ms || 2500))]);
+}
+/* coverage: how much of the recent log actually carries a city */
+async function loadLocCheck(){
+  const cov = document.getElementById('locCoverage'), lat = document.getElementById('locLatest');
+  if(!cov) return;
+  cov.textContent = '…';
+  let rows = [];
+  try{
+    const r = await fetch(SB_URL + '/rest/v1/portfolio_events?select=event,created_at,meta&order=created_at.desc&limit=300', { headers: sbHeaders(), cache: 'no-store' });
+    if(r.ok) rows = await r.json();
+  }catch(e){ cov.textContent = 'unavailable (' + e.message + ')'; return; }
+  const n = rows.length, withLoc = rows.filter(e => e.meta && (e.meta.city || e.meta.country)).length;
+  cov.innerHTML = n ? ('<b style="color:' + (withLoc ? 'var(--ok)' : 'var(--warn)') + '">' + withLoc + '</b> of the last ' + n + ' events' +
+                       (withLoc ? '' : ' — no location saved yet')) : 'no events in the log yet';
+  if(lat) lat.innerHTML = rows[0] ? (esc(mmTimeAgo(rows[0].created_at)) + ' <span style="color:var(--muted)">(' + esc(new Date(rows[0].created_at).toLocaleString()) + ')</span>') : 'nothing recorded yet';
+}
+async function runLocProbe(){
+  const box = document.getElementById('locProbeOut'); if(!box) return;
+  box.style.display = 'block';
+  box.innerHTML = '<p style="color:var(--muted);font-size:13px">Probing every service from this browser…</p>';
+  const list = await Promise.all(MM_LOC_SERVICES.map(svc => mmAskService(svc[1], svc[2]).then(r => Object.assign({ name: svc[0] }, r))));
+  const ok = list.filter(r => r.ok).length;
+  const useless = list.filter(r => !r.ok && !/TypeError|blocked|timeout|Failed/i.test(r.err || '')).length;
+  box.innerHTML =
+    '<div style="margin-top:12px;font-size:13px">' +
+      (ok ? '<div class="banner" style="background:rgba(52,211,153,.12);border-color:rgba(52,211,153,.35);color:var(--ok);margin-bottom:10px">✅ ' + ok + ' of ' + list.length + ' services answer from this browser (' + esc((list.find(r => r.ok) || {}).txt) + '). The lookup works here — a null in the log means that row was written <b>before</b> the updated index.html went live.</div>'
+          : '<div class="banner" style="background:rgba(251,191,36,.1);border-color:rgba(251,191,36,.35);color:var(--warn);margin-bottom:10px">⚠️ No service answers from this browser: an ad blocker / privacy extension (uBlock Origin, Brave Shields, Firefox Enhanced Tracking Protection) or a VPN is eating these requests. Visitors with the same setup get counted as visits but without a city. Turn it off for your own test visit to see the full pipeline.</div>'
+          + (useless ? '<p style="color:var(--muted);font-size:12.5px;margin-bottom:10px">' + useless + ' of them did reply, but without usable data — the free tiers are rate limited (about 1,000 lookups/day per service), so try again later.</p>' : '')) +
+      list.map(r => '<div style="display:flex;gap:9px;align-items:center;padding:4px 0;border-bottom:1px solid var(--line)">' +
+        '<span>' + (r.ok ? '✅' : '❌') + '</span><span style="font-family:var(--mono);font-size:12px;min-width:120px">' + esc(r.name) + '</span>' +
+        '<span style="color:' + (r.ok ? 'var(--ok)' : 'var(--muted)') + ';font-size:12.5px">' + esc(r.ok ? r.txt : r.err) + '</span></div>').join('') +
+    '</div>';
+}
+
 /* ---- 📊 Analytics ---- */
 const ANALYTICS_SNIPPET = [
   "/* ✅ index.html already does all of this — nothing to paste for this site.",
@@ -767,8 +829,13 @@ const ANALYTICS_SNIPPET = [
 R.analytics = function(){
   return '<h2>Analytics</h2><div class="desc">Visits, unique visitors, clicks, where people came from &amp; which city/country they are in — reported by the live site, stored in Supabase.</div>'+
     '<div class="hint" style="margin-bottom:14px">🌍 Location is read from the visitor\'s IP address (city level, via a free public lookup). <b>No GPS and no location permission</b> are ever requested, no coordinates are stored, and the IP itself is never saved.</div>'+
-    '<div class="chip-row" style="margin-bottom:14px"><button class="mini" data-act="analytics-refresh">↻ Refresh</button></div>'+
+    '<div class="chip-row" style="margin-bottom:14px"><button class="mini" data-act="analytics-refresh">↻ Refresh</button><button class="mini" data-act="loc-probe">🔎 Test the location lookup</button></div>'+
     '<div class="card" id="analyticsBody"><p style="color:var(--muted)">Loading analytics…</p></div>'+
+    '<div class="card" style="margin-bottom:14px"><h3>🔎 Location check<span class="line"></span></h3>'+
+      '<p style="color:var(--muted);font-size:13px">City / country are resolved in the <b>visitor\'s own browser</b> (from their IP, no GPS). A visitor whose browser blocks those services is still counted as a visit — only the location stays empty, which is what a <code>null</code> means.</p>'+
+      '<div class="hint" style="margin-top:10px">Events with a city: <b id="locCoverage">…</b><br>Latest event in the log: <b id="locLatest">…</b></div>'+
+      '<div id="locProbeOut" style="display:none"></div>'+
+    '</div>'+
     '<div class="card"><h3>Site wiring<span class="line"></span></h3>'+
     '<p style="color:var(--muted);font-size:13px">index.html already reports everything automatically (visits are deduped: one visit per 30 minutes, and the dashboard preview is never counted). This snippet is only for building another page on the same database:</p>'+
     '<pre class="snip">'+esc(ANALYTICS_SNIPPET)+'</pre></div>';
@@ -987,7 +1054,7 @@ async function loadAnalytics(){
       '<b style="min-width:26px;text-align:right" title="'+(c.visitors||0)+' visitor(s)' + (c.visits ? ', ' + (c.visits||0) + ' visit(s) in the last 30 days' : '')+'">'+(c.visitors||0)+'</b>'+
       '<span style="min-width:96px;text-align:right;font-size:11.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+esc(c.country||'')+'">'+esc(c.country||'')+'</span>'+
     '</div>').join('')
-    : '<p style="color:var(--muted);font-size:13px">No city / country saved yet — the live site adds it to every visit automatically (read from the IP address; the visitor is never asked for location). Events stored before this feature have no location.</p>';
+    : '<p style="color:var(--muted);font-size:13px">No city / country saved yet. Two normal reasons: rows written <b>before</b> the updated index.html went live have no location (the IP is never stored, so they can never be filled retroactively), or a visitor\'s browser blocks the IP services (ad blocker / VPN). Use the <b>🔎 Test the location lookup</b> button above to see which one it is.</p>';
   const countryChips = cts.length ? '<div class="chip-row" style="margin-top:12px">'+cts.map(c =>
       '<span class="badge" title="'+esc(c.country||'')+(c.visits ? ' — ' + c.visits + ' visits' : '')+'">'+mmFlag(c.country_code)+' '+esc(c.country||'?')+' · '+(c.visitors||0)+'</span>').join('')+'</div>' : '';
   const when = s => { const t = Date.parse(s); return t ? new Date(t).toLocaleString() : ''; };
@@ -1096,7 +1163,7 @@ function renderTab(tab){
   document.getElementById('main').innerHTML = R[tab] ? R[tab]() : '';
   window.scrollTo(0,0);
   if(tab === 'preview'){ const fr = document.getElementById('previewFrame'); fr.onload = pushPreview; }
-  if(tab === 'analytics') loadAnalytics();
+  if(tab === 'analytics'){ loadAnalytics(); loadLocCheck(); }
   if(tab === 'messages') loadMessages();
 }
 function pushPreview(){ const fr = document.getElementById('previewFrame'); if(fr && fr.contentWindow){ const c = deepClone(CONTENT); delete c.__empty; fr.contentWindow.postMessage({type:'mm-preview', content:c}, '*'); } }
@@ -1171,7 +1238,8 @@ main.addEventListener('click', async e => {
   if(act === 'design-accent'){ setPath(CONTENT, 'design.colors.accent', b.dataset.v); markDirty(); renderTab(currentTab); return; }
   if(act === 'design-reset'){ if(!confirm('Reset all design settings (theme, colors, fonts, animations, layout…) to defaults?')) return; setPath(CONTENT, 'design', deepClone(EMPTY_CONTENT.design)); markDirty(); renderTab(currentTab); return; }
   if(act === 'pv-refresh'){ const fr = document.getElementById('previewFrame'); fr.src = 'index.html?preview=' + Date.now(); return; }
-  if(act === 'analytics-refresh'){ loadAnalytics(); return; }
+  if(act === 'analytics-refresh'){ loadAnalytics(); loadLocCheck(); return; }
+  if(act === 'loc-probe'){ runLocProbe(); return; }
   if(act === 'msg-filter'){ msgFilter = b.dataset.filter; loadMessages(); return; }
   if(act === 'msg-open'){
     const id = +b.dataset.id;
