@@ -616,7 +616,6 @@ as $$
       'null'::jsonb) as j
   ),
   sources as (
-    /* where visitors came from: meta.source (new rows) or utm/fbclid in path (old rows) */
     select coalesce(
       (select jsonb_agg(jsonb_build_object('source', s.src, 'visits', s.cnt) order by s.cnt desc)
          from (select public.pb_event_source(ev.meta, ev.path) as src,
@@ -625,19 +624,21 @@ as $$
                 where event = 'view'
                 group by 1
                 order by cnt desc
-                limit 6) s),
+                limit 8) s),
       '[]'::jsonb) as j
   ),
-  /* ---- location: the site resolves the visitor IP to a CITY + COUNTRY (no GPS,
-     no browser permission) and stores them in meta of the events it sends.
-     Read from meta only, so this works with or without the extra columns. ---- */
   loc as (
     select e.created_at,
            e.event,
            coalesce(e.visitor_id, 'anon')                      as visitor_id,
            nullif(coalesce(e.meta ->> 'city', ''), '')         as city,
            nullif(coalesce(e.meta ->> 'country', ''), '')      as country,
-           nullif(coalesce(e.meta ->> 'country_code', ''), '') as country_code
+           nullif(coalesce(e.meta ->> 'country_code', ''), '') as country_code,
+           nullif(coalesce(e.meta ->> 'isp', ''), '')          as isp,
+           nullif(coalesce(e.meta ->> 'asn', ''), '')          as asn,
+           nullif(coalesce(e.meta ->> 'ip_type', ''), '')      as ip_type,
+           nullif(coalesce(e.meta ->> 'visitor_type', ''), '') as visitor_type,
+           nullif(coalesce(e.meta ->> 'location_confidence', ''), '') as location_confidence
       from ev e
      where nullif(coalesce(e.meta ->> 'city', ''), '') is not null
         or nullif(coalesce(e.meta ->> 'country', ''), '') is not null
@@ -670,8 +671,26 @@ as $$
           limit 12) x),
       '[]'::jsonb) as j
   ),
-  /* one row per visitor: what the dashboard lists as "Visitors" - city + country
-     is the most recent one that visitor was seen in */
+  visitor_types as (
+    select coalesce(
+      (select jsonb_agg(jsonb_build_object('visitor_type', t.vt, 'visitors', t.visitors, 'visits', t.visits) order by t.visitors desc)
+         from (select coalesce(nullif(meta->>'visitor_type',''), 'unknown') as vt,
+                      count(distinct visitor_id) as visitors,
+                      count(*) filter (where event='view') as visits
+                 from ev where event='view'
+                group by 1 order by visitors desc limit 10) t),
+      '[]'::jsonb) as j
+  ),
+  ip_types as (
+    select coalesce(
+      (select jsonb_agg(jsonb_build_object('ip_type', t.it, 'visitors', t.visitors, 'visits', t.visits) order by t.visitors desc)
+         from (select coalesce(nullif(meta->>'ip_type',''), 'unknown') as it,
+                      count(distinct visitor_id) as visitors,
+                      count(*) filter (where event='view') as visits
+                 from ev where event='view'
+                group by 1 order by visitors desc limit 10) t),
+      '[]'::jsonb) as j
+  ),
   visitors as (
     select coalesce(
       (select jsonb_agg(x order by x.last_seen desc) from (
@@ -684,6 +703,34 @@ as $$
                    filter (where nullif(coalesce(e.meta ->> 'country', ''), '') is not null))[1]         as country,
                 (array_agg(e.meta ->> 'country_code' order by e.created_at desc)
                    filter (where nullif(coalesce(e.meta ->> 'country_code', ''), '') is not null))[1]    as country_code,
+                (array_agg(e.meta ->> 'isp' order by e.created_at desc)
+                   filter (where nullif(coalesce(e.meta ->> 'isp', ''), '') is not null))[1]             as isp,
+                (array_agg(e.meta ->> 'org' order by e.created_at desc)
+                   filter (where nullif(coalesce(e.meta ->> 'org', ''), '') is not null))[1]             as org,
+                (array_agg(e.meta ->> 'asn' order by e.created_at desc)
+                   filter (where nullif(coalesce(e.meta ->> 'asn', ''), '') is not null))[1]             as asn,
+                (array_agg(e.meta ->> 'ip_type' order by e.created_at desc)
+                   filter (where nullif(coalesce(e.meta ->> 'ip_type', ''), '') is not null))[1]         as ip_type,
+                (array_agg(e.meta ->> 'visitor_type' order by e.created_at desc)
+                   filter (where nullif(coalesce(e.meta ->> 'visitor_type', ''), '') is not null))[1]    as visitor_type,
+                (array_agg(e.meta ->> 'visitor_type_confidence' order by e.created_at desc)
+                   filter (where nullif(coalesce(e.meta ->> 'visitor_type_confidence', ''), '') is not null))[1] as visitor_type_confidence,
+                (array_agg(e.meta ->> 'location_confidence' order by e.created_at desc)
+                   filter (where nullif(coalesce(e.meta ->> 'location_confidence', ''), '') is not null))[1] as location_confidence,
+                (array_agg(e.meta ->> 'traffic_source' order by e.created_at desc)
+                   filter (where nullif(coalesce(e.meta ->> 'traffic_source', e.meta ->> 'source', ''), '') is not null))[1] as traffic_source,
+                (array_agg(e.meta ->> 'user_agent' order by e.created_at desc)
+                   filter (where nullif(coalesce(e.meta ->> 'user_agent', ''), '') is not null))[1] as user_agent,
+                (array_agg((e.meta ->> 'vpn_detected') order by e.created_at desc)
+                   filter (where e.meta ? 'vpn_detected'))[1]::boolean as vpn_detected,
+                (array_agg((e.meta ->> 'proxy_detected') order by e.created_at desc)
+                   filter (where e.meta ? 'proxy_detected'))[1]::boolean as proxy_detected,
+                (array_agg((e.meta ->> 'tor_detected') order by e.created_at desc)
+                   filter (where e.meta ? 'tor_detected'))[1]::boolean as tor_detected,
+                (array_agg((e.meta ->> 'hosting_detected') order by e.created_at desc)
+                   filter (where e.meta ? 'hosting_detected'))[1]::boolean as hosting_detected,
+                (array_agg((e.meta ->> 'location_masked') order by e.created_at desc)
+                   filter (where e.meta ? 'location_masked'))[1]::boolean as location_masked,
                 count(*) filter (where e.event = 'view')                 as visits,
                 count(*)                                                 as events,
                 min(e.created_at) filter (where e.event = 'view')         as first_visit,
@@ -693,7 +740,7 @@ as $$
            from ev e
           group by coalesce(e.visitor_id, '(unknown)')
           order by max(e.created_at) desc
-          limit 40) x),
+          limit 60) x),
       '[]'::jsonb) as j
   )
   select jsonb_build_object(
@@ -704,10 +751,13 @@ as $$
     'sources',     (select j from sources),
     'cities',      (select j from cities),
     'countries',   (select j from countries),
+    'visitor_types', (select j from visitor_types),
+    'ip_types',    (select j from ip_types),
     'visitors',    (select j from visitors),
     'messages',    (select count(*) from public.portfolio_messages)
   );
 $$;
+
 
 create or replace function public.update_message(p_password text, p_id bigint, p_status text)
 returns boolean
@@ -756,7 +806,7 @@ update public.portfolio_events
 
 -- 2) readable views - they show up in Supabase -> Table Editor
 
--- one row per visitor
+-- one row per visitor - extended v4: IP type, visitor type, ISP/ASN, confidence, etc (all appended at END to preserve existing columns)
 create or replace view public.site_visitors as
 select
   coalesce(visitor_id, '(unknown)')                          as visitor_id,
@@ -777,7 +827,22 @@ select
   (array_agg(meta ->> 'country_code' order by created_at desc) filter (where nullif(coalesce(meta ->> 'country_code', ''), '') is not null))[1] as country_code,
   nullif(concat_ws(', ',
     (array_agg(meta ->> 'city'    order by created_at desc) filter (where nullif(coalesce(meta ->> 'city', ''), '') is not null))[1],
-    (array_agg(meta ->> 'country' order by created_at desc) filter (where nullif(coalesce(meta ->> 'country', ''), '') is not null))[1]), '') as location
+    (array_agg(meta ->> 'country' order by created_at desc) filter (where nullif(coalesce(meta ->> 'country', ''), '') is not null))[1]), '') as location,
+  /* --- v4 extended fields (privacy: IP-based estimates only, never exact physical location, no GPS) --- */
+  (array_agg(meta ->> 'isp' order by created_at desc) filter (where nullif(coalesce(meta ->> 'isp', ''), '') is not null))[1] as isp,
+  (array_agg(meta ->> 'org' order by created_at desc) filter (where nullif(coalesce(meta ->> 'org', ''), '') is not null))[1] as org,
+  (array_agg(meta ->> 'asn' order by created_at desc) filter (where nullif(coalesce(meta ->> 'asn', ''), '') is not null))[1] as asn,
+  (array_agg(meta ->> 'ip_type' order by created_at desc) filter (where nullif(coalesce(meta ->> 'ip_type', ''), '') is not null))[1] as ip_type,
+  (array_agg(meta ->> 'visitor_type' order by created_at desc) filter (where nullif(coalesce(meta ->> 'visitor_type', ''), '') is not null))[1] as visitor_type,
+  (array_agg(meta ->> 'visitor_type_confidence' order by created_at desc) filter (where nullif(coalesce(meta ->> 'visitor_type_confidence', ''), '') is not null))[1] as visitor_type_confidence,
+  (array_agg(meta ->> 'location_confidence' order by created_at desc) filter (where nullif(coalesce(meta ->> 'location_confidence', ''), '') is not null))[1] as location_confidence,
+  (array_agg(coalesce(meta ->> 'traffic_source', meta ->> 'source') order by created_at desc) filter (where nullif(coalesce(meta ->> 'traffic_source', meta ->> 'source', ''), '') is not null))[1] as traffic_source,
+  (array_agg(meta ->> 'user_agent' order by created_at desc) filter (where nullif(coalesce(meta ->> 'user_agent', ''), '') is not null))[1] as user_agent,
+  (array_agg((meta ->> 'vpn_detected') order by created_at desc) filter (where meta ? 'vpn_detected'))[1]::boolean as vpn_detected,
+  (array_agg((meta ->> 'proxy_detected') order by created_at desc) filter (where meta ? 'proxy_detected'))[1]::boolean as proxy_detected,
+  (array_agg((meta ->> 'tor_detected') order by created_at desc) filter (where meta ? 'tor_detected'))[1]::boolean as tor_detected,
+  (array_agg((meta ->> 'hosting_detected') order by created_at desc) filter (where meta ? 'hosting_detected'))[1]::boolean as hosting_detected,
+  (array_agg((meta ->> 'location_masked') order by created_at desc) filter (where meta ? 'location_masked'))[1]::boolean as location_masked
 from public.portfolio_events
 group by coalesce(visitor_id, '(unknown)');
 
@@ -795,7 +860,7 @@ select
 from public.portfolio_events
 group by 1;
 
--- the raw log, but human-readable
+-- the raw log, but human-readable - extended v4 with IP type, visitor type, ISP/ASN, confidence (appended at END)
 create or replace view public.site_events_log as
 select
   created_at                                                             as time,
@@ -812,7 +877,6 @@ select
     else event
   end                                                                    as what_happened,
   coalesce(visitor_id, '(unknown)')                                      as visitor,
-  /* the visitor's main traffic source (falls back to this event's own derivation) */
   coalesce(
     (select mode() within group (order by public.pb_event_source(v.meta, v.path))
        from public.portfolio_events v
@@ -820,9 +884,19 @@ select
     public.pb_event_source(meta, path))                                  as source,
   coalesce(meta ->> 'project', meta ->> 'title', meta ->> 'url', meta ->> 'email', '') as details,
   path,
-  /* city + country from the visitor IP (no GPS). Empty for rows saved before the
-     location feature was installed. Appended last - see the site_visitors note. */
-  nullif(concat_ws(', ', nullif(meta ->> 'city', ''), nullif(meta ->> 'country', '')), '') as location
+  nullif(concat_ws(', ', nullif(meta ->> 'city', ''), nullif(meta ->> 'country', '')), '') as location,
+  nullif(meta ->> 'isp', '') as isp,
+  nullif(meta ->> 'asn', '') as asn,
+  nullif(meta ->> 'ip_type', '') as ip_type,
+  nullif(meta ->> 'visitor_type', '') as visitor_type,
+  nullif(meta ->> 'location_confidence', '') as location_confidence,
+  coalesce(nullif(meta ->> 'traffic_source', ''), nullif(meta ->> 'source', '')) as traffic_source,
+  (meta ->> 'vpn_detected')::boolean as vpn_detected,
+  (meta ->> 'proxy_detected')::boolean as proxy_detected,
+  (meta ->> 'tor_detected')::boolean as tor_detected,
+  (meta ->> 'hosting_detected')::boolean as hosting_detected,
+  (meta ->> 'location_masked')::boolean as location_masked,
+  nullif(meta ->> 'user_agent', '') as user_agent
 from public.portfolio_events
 order by created_at desc;
 
@@ -880,17 +954,23 @@ end $$;
 -- 1) expose the meta keys as real, readable columns.
 --    Generated columns can never drift from `meta`, and the insert the site makes
 --    stays exactly as it was (it only ever writes meta).
+--    Extended for v4: IP type, visitor type, ISP/ASN, confidence, traffic source, etc.
+--    Privacy: no GPS, no precise location, city is ISP gateway estimate only.
 do $$
 declare col text;
 begin
-  foreach col in array array['city', 'country', 'country_code'] loop
+  foreach col in array array['city', 'country', 'country_code', 'isp', 'org', 'asn', 'ip_type', 'visitor_type', 'location_confidence', 'traffic_source', 'user_agent', 'region', 'visitor_type_confidence', 'bot_signals'] loop
     if not exists (
       select 1 from information_schema.columns
        where table_schema = 'public' and table_name = 'portfolio_events' and column_name = col
     ) then
-      execute format(
-        'alter table public.portfolio_events add column %I text generated always as ( nullif(meta ->> %L, %L) ) stored',
-        col, col, '');
+      if col = 'traffic_source' then
+        execute format('alter table public.portfolio_events add column %I text generated always as ( nullif(coalesce(meta ->> ''traffic_source'', meta ->> ''source'', ''''), '''') ) stored', col);
+      else
+        execute format(
+          'alter table public.portfolio_events add column %I text generated always as ( nullif(meta ->> %L, %L) ) stored',
+          col, col, '');
+      end if;
       raise notice 'portfolio_events.% added (read straight from meta)', col;
     end if;
   end loop;
@@ -899,7 +979,28 @@ exception
     raise notice 'location columns skipped (%) -- the dashboard reads them from meta anyway', sqlerrm;
 end $$;
 
+-- boolean / extra flags (vpn/proxy/tor/hosting/mobile/masked/estimate) - stored as boolean generated columns
+do $$
+declare col text;
+begin
+  foreach col in array array['vpn_detected','proxy_detected','tor_detected','hosting_detected','mobile_detected','location_masked','location_is_estimate'] loop
+    if not exists (
+      select 1 from information_schema.columns
+       where table_schema = 'public' and table_name = 'portfolio_events' and column_name = col
+    ) then
+      execute format(
+        'alter table public.portfolio_events add column %I boolean generated always as ( case when (meta ? %L) then (meta ->> %L)::boolean else null end ) stored',
+        col, col, col);
+      raise notice 'portfolio_events.% boolean added', col;
+    end if;
+  end loop;
+exception
+  when others then
+    raise notice 'boolean location flags skipped (%)', sqlerrm;
+end $$;
+
 -- 2) rollups, so the Table Editor shows the same picture as the dashboard
+-- Privacy: city is ISP gateway estimate only, not exact physical location. No GPS.
 create or replace view public.site_traffic_by_country as
 select
   coalesce(nullif(meta ->> 'country', ''), '(unknown)')                 as country,
@@ -926,18 +1027,62 @@ from public.portfolio_events
 where nullif(coalesce(meta ->> 'city', ''), '') is not null
 group by nullif(meta ->> 'city', ''), coalesce(nullif(meta ->> 'country', ''), '(unknown)');
 
-comment on view public.site_traffic_by_country is 'Visitors grouped by country (city-level IP lookup, no GPS)';
-comment on view public.site_traffic_by_city    is 'Visitors grouped by city + country (city-level IP lookup, no GPS)';
+-- v4: visitor type breakdown (Human / Possible Bot / Scanner etc) - non-definitive labels
+create or replace view public.site_traffic_by_visitor_type as
+select
+  coalesce(nullif(meta ->> 'visitor_type', ''), 'unknown')              as visitor_type,
+  count(distinct coalesce(visitor_id, '(unknown)'))                     as visitors,
+  count(*) filter (where event = 'view')                                as visits,
+  max(created_at)                                                       as last_seen
+from public.portfolio_events
+where event = 'view'
+group by coalesce(nullif(meta ->> 'visitor_type', ''), 'unknown');
+
+-- v4: IP type breakdown (residential / mobile / vpn / proxy / tor / hosting / unknown)
+create or replace view public.site_traffic_by_ip_type as
+select
+  coalesce(nullif(meta ->> 'ip_type', ''), 'unknown')                   as ip_type,
+  count(distinct coalesce(visitor_id, '(unknown)'))                     as visitors,
+  count(*) filter (where event = 'view')                                as visits,
+  max(created_at)                                                       as last_seen
+from public.portfolio_events
+where event = 'view'
+group by coalesce(nullif(meta ->> 'ip_type', ''), 'unknown');
+
+-- v4: ISP / ASN breakdown (helps spot hosting / VPN providers)
+create or replace view public.site_traffic_by_isp as
+select
+  coalesce(nullif(meta ->> 'isp', ''), '(unknown)')                     as isp,
+  max(nullif(meta ->> 'asn', ''))                                       as asn,
+  count(distinct coalesce(visitor_id, '(unknown)'))                     as visitors,
+  count(*) filter (where event = 'view')                                as visits,
+  max(created_at)                                                       as last_seen
+from public.portfolio_events
+where event = 'view'
+group by coalesce(nullif(meta ->> 'isp', ''), '(unknown)');
+
+comment on view public.site_traffic_by_country is 'Visitors grouped by country (city-level IP lookup, no GPS, estimate only)';
+comment on view public.site_traffic_by_city    is 'Visitors grouped by city + country (city-level IP lookup, no GPS, estimate only - city is ISP gateway)';
+comment on view public.site_traffic_by_visitor_type is 'Visitors grouped by detected type (Human / Possible Bot / Possible Link Scanner / VPN / Proxy / Data Center / Unknown) - non-definitive, multi-signal';
+comment on view public.site_traffic_by_ip_type is 'Visitors grouped by IP type (residential / mobile / vpn / proxy / tor / hosting / unknown) - estimate, may be masked';
+comment on view public.site_traffic_by_isp is 'Visitors grouped by ISP / ASN (helps detect hosting / VPN / proxy)';
 
 -- same lock as the other readable views: Table Editor only, not the public API
-revoke select on public.site_traffic_by_country, public.site_traffic_by_city
+revoke select on public.site_traffic_by_country, public.site_traffic_by_city,
+             public.site_traffic_by_visitor_type, public.site_traffic_by_ip_type, public.site_traffic_by_isp
   from anon, authenticated, public;
 
--- 3) one index that keeps the location rollups quick on a growing log
+-- 3) indexes that keep the rollups quick on a growing log
 do $$
 begin
   create index if not exists portfolio_events_location_idx
     on public.portfolio_events (lower(coalesce(nullif(meta ->> 'country', ''), '(unknown)')));
+  create index if not exists portfolio_events_ip_type_idx
+    on public.portfolio_events (lower(coalesce(nullif(meta ->> 'ip_type', ''), 'unknown')));
+  create index if not exists portfolio_events_visitor_type_idx
+    on public.portfolio_events (lower(coalesce(nullif(meta ->> 'visitor_type', ''), 'unknown')));
+  create index if not exists portfolio_events_isp_idx
+    on public.portfolio_events (lower(coalesce(nullif(meta ->> 'isp', ''), '(unknown)')));
 exception
   when others then raise notice 'location index skipped (%)', sqlerrm;
 end $$;

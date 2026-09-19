@@ -807,32 +807,36 @@ var MM_LOC_TTL = 6 * 60 * 60 * 1000;    /* re-look-up at most every 6 hours */
 var MM_LOC_WAIT = 1500;                 /* an event is never held longer than this for a lookup */
 var MM_LOC_ONE = 2000;                  /* per-provider timeout */
 var MM_LOC_SERVICES = [
-  /* [url, reader] — each provider spells the fields differently, so map them here */
+  /* first: ip-api.com gives proxy/hosting/mobile flags (VPN/Proxy/Tor/Data Center detection) */
+  ['https://ip-api.com/json/?fields=status,message,country,countryCode,regionName,city,isp,org,as,proxy,hosting,mobile,query', function(d){
+     if(!d || d.status !== 'success') return null;
+     return { city: d.city, region: d.regionName, country: d.country, code: d.countryCode, isp: d.isp, org: d.org, asn: d.as, proxy: !!d.proxy, hosting: !!d.hosting, mobile: !!d.mobile, ip: d.query };
+   }],
   ['https://ipwho.is/', function(d){
      if(d && d.success === false) return null;
-     return { city: d.city, region: d.region, country: d.country, code: d.country_code, isp: d.connection && d.connection.isp, asn: d.connection && d.connection.asn };
+     var sec = d.security || {};
+     return { city: d.city, region: d.region, country: d.country, code: d.country_code, isp: (d.connection && d.connection.isp) || d.isp, org: (d.connection && d.connection.org) || '', asn: (d.connection && d.connection.asn) || d.asn || '', proxy: !!(sec.proxy || d.proxy), hosting: !!(sec.hosting || d.hosting), tor: !!sec.tor, vpn: !!(sec.vpn), mobile: !!sec.mobile, ip: d.ip };
    }],
   ['https://ipapi.co/json/', function(d){
      if(d && d.error) return null;
-     return { city: d.city, region: d.region, country: d.country_name, code: d.country_code, isp: d.org, asn: d.asn };
+     return { city: d.city, region: d.region, country: d.country_name, code: d.country_code, isp: d.org, org: d.org, asn: d.asn, ip: d.ip };
    }],
   ['https://free.freeipapi.com/api/v1/json', function(d){
-     return { city: d.cityName, region: d.regionName, country: d.countryName, code: d.countryCode, isp: d.asnOrganization, asn: d.asn };
+     return { city: d.cityName, region: d.regionName, country: d.countryName, code: d.countryCode, isp: d.asnOrganization, org: d.asnOrganization, asn: d.asn, ip: d.ipAddress };
    }],
   ['https://api.ip.sb/geoip', function(d){
-     return { city: d.city, region: d.region, country: d.country, code: d.country_code, isp: d.isp, asn: d.asn };
+     return { city: d.city, region: d.region, country: d.country, code: d.country_code, isp: d.isp, org: d.organization || d.isp, asn: d.asn, ip: d.ip };
    }],
   ['https://get.geojs.io/v1/ip/geo.json', function(d){
-     return { city: d.city, region: d.region, country: d.country, code: d.country_code, isp: d.organization };
+     return { city: d.city, region: d.region, country: d.country, code: d.country_code, isp: d.organization, org: d.organization, asn: d.asn, ip: d.ip };
    }],
   ['https://wtfismyip.com/json', function(d){
-     return { city: d.YourFuckingCity, country: d.YourFuckingCountry, code: d.YourFuckingCountryCode, isp: d.YourFuckingISP };
+     return { city: d.YourFuckingCity, country: d.YourFuckingCountry, code: d.YourFuckingCountryCode, isp: d.YourFuckingISP, org: d.YourFuckingISP, ip: d.YourFuckingIPAddress };
    }],
-  /* last resort: country only (free tier has no city) - still far better than nothing */
   ['https://api.my-ip.io/v2/ip.json', function(d){
      if(!d || d.success === false) return null;
      var c = d.country || {}, a = d.asn || {};
-     return { country: c.name, code: c.code, isp: a.name, asn: a.number };
+     return { country: c.name, code: c.code, isp: a.name, org: a.name, asn: a.number, ip: d.ip };
    }]
 ];
 var MM_LOC = null;            /* the location as soon as it is known (sync copy for other code) */
@@ -843,24 +847,142 @@ var MM_LOC_ERR = '';          /* why nothing answered: '' | 'blocked' | 'no-data
 var MM_LOC_DEBUG = false;      /* turned on by ?mmloc on the live site - see mmLocCheck() */
 function mmLocNote(msg){ try{ (MM_LOC_DEBUG ? console.warn : console.info)('[analytics] ' + msg); }catch(_e){} }
 
-/* keep only the readable, coarse pieces (and never junk like "unknown") */
+/* ---------- privacy & reliability: no GPS, only coarse IP signals ---------- */
+var MM_VPN_KEYWORDS = ['vpn','nordvpn','expressvpn','protonvpn','surfshark','mullvad','ivpn','private internet access','pia','wireguard','openvpn','ipvanish','windscribe','tunnelbear','vyprvpn','cyberghost','hide.me','hidemyass','perfect privacy','azirevpn','ovpn','vpn unlimited','proton vpn'];
+var MM_HOSTING_KEYWORDS = ['amazon','aws','ec2','google cloud','gcp','microsoft','azure','digitalocean','linode','vultr','ovh','hetzner','contabo','datacenter','data center','hosting','cloudflare','fastly','akamai','cloud','server','choopa','leaseweb','m247','datacamp','zscaler','oracle cloud','alibaba cloud','ibm cloud','ovhcloud','scaleway','upcloud','dreamhost','bluehost','hostgator','godaddy hosting','rackspace','softlayer','hivelocity','quadranet','psychz','colo','colocation','dedicated','vps','datacamp limited','amazon.com','google llc','microsoft corporation'];
+var MM_PROXY_KEYWORDS = ['proxy','anonymizer','hide my ip','anonym','squid','luminati','bright data','oxylabs','smartproxy','proxy service'];
+var MM_TOR_KEYWORDS = ['tor','onion','tor exit'];
+
+function mmStrHas(hay, needles){
+  hay = String(hay||'').toLowerCase();
+  if(!hay) return false;
+  for(var i=0;i<needles.length;i++){ if(hay.indexOf(needles[i])>-1) return true; }
+  return false;
+}
 function mmCleanLoc(o){
   if(!o || typeof o !== 'object') return null;
   function one(v){
-    /* a provider that starts returning an object/array for a field must not put
-       "[object Object]" into the database — only plain text is accepted */
     if(typeof v !== 'string' && typeof v !== 'number') return '';
     v = String(v == null ? '' : v).replace(/[<>]/g, '').trim();
     if(!v || v === '-' || /^(unknown|private|reserved|localhost|loopback|\[object)/i.test(v)) return '';
-    return v.slice(0, 64);
+    return v.slice(0, 80);
   }
-  var loc = { city: one(o.city), region: one(o.region), country: one(o.country), code: one(o.code).toUpperCase().slice(0, 2),
-              isp: one(o.isp), asn: one(o.asn) };
+  function bool(v){ return !!v; }
+  var loc = {
+    city: one(o.city), region: one(o.region), country: one(o.country), code: one(o.code).toUpperCase().slice(0,2),
+    isp: one(o.isp), org: one(o.org), asn: one(o.asn), ip: one(o.ip),
+    proxy: bool(o.proxy), hosting: bool(o.hosting), mobile: bool(o.mobile), tor: bool(o.tor), vpn: bool(o.vpn)
+  };
   if(!loc.city && !loc.country) return null;
   return loc;
 }
-
 function mmLocLabel(loc){ return loc ? ([loc.city, loc.country].filter(Boolean).join(', ') || '—') : '—'; }
+
+function mmDetectIpType(loc){
+  loc = loc || {};
+  var ispStr = [loc.isp, loc.org, loc.asn].join(' ').toLowerCase();
+  var vpn = !!loc.vpn;
+  var proxy = !!loc.proxy;
+  var tor = !!loc.tor;
+  var hosting = !!loc.hosting;
+  var mobile = !!loc.mobile;
+
+  if(!vpn && mmStrHas(ispStr, MM_VPN_KEYWORDS)) vpn = true;
+  if(!proxy && mmStrHas(ispStr, MM_PROXY_KEYWORDS)) proxy = true;
+  if(!hosting && mmStrHas(ispStr, MM_HOSTING_KEYWORDS)) hosting = true;
+  if(!tor && mmStrHas(ispStr, MM_TOR_KEYWORDS)) tor = true;
+
+  var ip_type = 'unknown';
+  if(tor) ip_type = 'tor';
+  else if(proxy) ip_type = 'proxy';
+  else if(vpn) ip_type = 'vpn';
+  else if(hosting) ip_type = 'hosting';
+  else if(mobile) ip_type = 'mobile';
+  else if(loc.isp || loc.org) ip_type = 'residential';
+  else ip_type = 'unknown';
+
+  var location_confidence = 'unknown';
+  var masked = false;
+  if(tor || proxy || vpn || hosting){
+    masked = true;
+    location_confidence = 'low';
+  } else if(ip_type === 'residential' && loc.city){
+    location_confidence = 'high';
+  } else if((ip_type === 'residential' || ip_type === 'mobile') && loc.country){
+    location_confidence = loc.city ? 'medium' : 'low';
+  } else if(loc.country){
+    location_confidence = 'low';
+  }
+
+  return { ip_type: ip_type, vpn_detected: vpn, proxy_detected: proxy, tor_detected: tor, hosting_detected: hosting, mobile_detected: mobile, location_confidence: location_confidence, location_masked: masked };
+}
+
+function mmGetUserAgent(){
+  try{
+    var ua = navigator.userAgent || '';
+    return ua.slice(0, 180);
+  }catch(_e){ return ''; }
+}
+
+function mmClassifyVisitorType(){
+  var ua = '';
+  try{ ua = (navigator.userAgent || '').toLowerCase(); }catch(_e){}
+  var webdriver = false;
+  try{ webdriver = !!navigator.webdriver; }catch(_e){}
+  var loc = MM_LOC || {};
+  var ipDet = mmDetectIpType(loc);
+  var signals = [];
+  var type = 'unknown';
+  var confidence = 'low';
+
+  var BOT_PATTERNS = ['googlebot','bingbot','yandex','baiduspider','duckduckbot','slurp','semrushbot','ahrefsbot','dotbot','mj12bot','rogerbot','exabot','ia_archiver','sogou','petalbot','bytespider','applebot','ahrefs','semrush','mj12','roger','exabot'];
+  var LINK_PREVIEW = ['facebookexternalhit','facebot','slackbot','twitterbot','linkedinbot','whatsapp','telegrambot','discordbot','skypeuripreview','googlebot-image','google-inspectiontool','embedly','quora link preview','outbrain','vkshare','w3c_validator','facebookcatalog','pinterest'];
+  var SCANNER = ['urlscan','virustotal','phishtank','google-safebrowsing','safebrowsing','urlvoid','hybrid-analysis','censysinspect','shodan','censys','projectdiscovery','nuclei','zgrab','masscan','nessus','qualys','security scanner','urlquery','any.run','virustotalbot','google favicon','chrome-lighthouse'];
+  var AUTOMATED = ['curl','wget','python-requests','python-urllib','go-http-client','axios','node-fetch','java/','libwww-perl','httpclient','okhttp','postman','insomnia','http_request','fetch api','undici','headlesschrome','phantomjs','selenium','puppeteer','playwright'];
+
+  function hasAny(list){ for(var i=0;i<list.length;i++){ if(ua.indexOf(list[i])>-1) return list[i]; } return null; }
+
+  var mScan = hasAny(SCANNER);
+  var mLink = hasAny(LINK_PREVIEW);
+  var mBot = hasAny(BOT_PATTERNS);
+  var mAuto = hasAny(AUTOMATED);
+
+  if(mScan){ type='scanner'; signals.push('ua:'+mScan); confidence='medium'; }
+  else if(mLink){ type='link_preview'; signals.push('ua:'+mLink); confidence='medium'; }
+  else if(mBot){ type='bot'; signals.push('ua:'+mBot); confidence='medium'; }
+  else if(mAuto || webdriver){ type='automated'; if(mAuto) signals.push('ua:'+mAuto); if(webdriver) signals.push('webdriver'); confidence='medium'; }
+  else {
+    var isBrowser = /chrome|firefox|safari|edg|opera|opr/i.test(navigator.userAgent||'');
+    var hasMozilla = ua.indexOf('mozilla')>-1;
+    if(isBrowser && hasMozilla && !webdriver){
+      if(ipDet.ip_type === 'hosting' || ipDet.hosting_detected){
+        type='unknown'; signals.push('hosting+isBrowser'); confidence='low';
+      } else {
+        type='human'; signals.push('browser ua'); confidence='medium';
+        if(ipDet.ip_type==='residential' || ipDet.ip_type==='mobile'){ confidence='high'; signals.push('residential ip'); }
+      }
+    } else if(!ua){
+      type='unknown'; signals.push('empty ua'); confidence='low';
+    } else {
+      type='unknown'; signals.push('unrecognized ua'); confidence='low';
+    }
+  }
+
+  if(ipDet.hosting_detected && (type==='bot' || type==='scanner' || type==='automated')){ confidence='high'; signals.push('hosting asn'); }
+  if(ipDet.ip_type==='hosting' && type==='human'){ type='unknown'; confidence='low'; signals.push('hosting contradicts human'); }
+
+  if(type==='unknown') confidence='low';
+
+  return { visitor_type: type, confidence: confidence, signals: signals.slice(0,6), ip_type_hint: ipDet.ip_type };
+}
+window.mmClassifyVisitorType = mmClassifyVisitorType;
+window.mmDetectIpType = mmDetectIpType;
+
+function mmLocationConfidence(loc){
+  if(!loc) return 'unknown';
+  var det = mmDetectIpType(loc);
+  return det.location_confidence;
+}
 
 function mmSaveLoc(loc, via){
   MM_LOC = loc || null;
@@ -868,15 +990,19 @@ function mmSaveLoc(loc, via){
   if(via != null) MM_LOC_VIA = String(via).replace(/^https?:\/\//, '').replace(/\/.*$/, '');
   if(!loc) return null;
   try{
-    localStorage.setItem(MM_LOC_KEY, JSON.stringify({ t: Date.now(), city: loc.city, region: loc.region, country: loc.country, code: loc.code,
-                                                        isp: loc.isp, asn: loc.asn, via: MM_LOC_VIA }));
+    var det = mmDetectIpType(loc);
+    localStorage.setItem(MM_LOC_KEY, JSON.stringify({
+      t: Date.now(), city: loc.city, region: loc.region, country: loc.country, code: loc.code,
+      isp: loc.isp, org: loc.org, asn: loc.asn, ip: loc.ip,
+      proxy: loc.proxy, hosting: loc.hosting, mobile: loc.mobile, tor: loc.tor, vpn: loc.vpn,
+      ip_type: det.ip_type, location_confidence: det.location_confidence,
+      via: MM_LOC_VIA
+    }));
   }catch(_e){}
   return loc;
 }
 window.mmSaveLoc = mmSaveLoc;
 
-/* one service -> { loc, err }. It NEVER rejects: a request killed by an ad blocker has to
-   leave the next service in the list a chance (a rejected fetch used to stop the whole chain). */
 function mmAskLoc(url, read){
   return fetch(url, { cache: 'no-store' })
     .then(function(r){ return r && r.ok ? r.json() : null; })
@@ -889,8 +1015,6 @@ function mmAskLoc(url, read){
 function mmLocDeadline(ms){
   return new Promise(function(res){ setTimeout(function(){ res({ loc: null, err: 'timeout' }); }, ms); });
 }
-/* ask every service once, in parallel, and report each answer - used by the ?mmloc self test
-   (the dashboard's "location check" mirrors the same list - keep both in sync) */
 function mmLocProbe(){
   return Promise.all(MM_LOC_SERVICES.map(function(svc){
     return Promise.race([mmAskLoc(svc[0], svc[1]), mmLocDeadline(MM_LOC_ONE)])
@@ -905,16 +1029,17 @@ var MM_LOC_PROMISE = (function(){
       var o = JSON.parse(localStorage.getItem(MM_LOC_KEY) || 'null');
       if(!o || typeof o !== 'object') return null;
       var loc = mmCleanLoc(o);
+      if(loc && o.ip_type) loc.ip_type = String(o.ip_type).slice(0,20);
       return loc ? { age: Date.now() - (Number(o.t) || 0), loc: loc, via: o.via || '' } : null;
     }catch(_e){ return null; }
   }
   var cached = fromCache();
-  if(MM_FRAMED) return Promise.resolve(null);   /* dashboard preview iframe: no lookup, no stats */
-  if(MM_LOC_DEBUG){                             /* ?mmloc forces a fresh look, and talks */
+  if(MM_FRAMED) return Promise.resolve(null);
+  if(MM_LOC_DEBUG){
     try{ localStorage.removeItem(MM_LOC_KEY); }catch(_e){}
     cached = null;
   }
-  if(cached && cached.age < MM_LOC_TTL){       /* fresh enough: zero extra delay, zero traffic */
+  if(cached && cached.age < MM_LOC_TTL){
     mmLocNote('location from cache: ' + mmLocLabel(cached.loc) + (cached.via ? ' (via ' + cached.via + ', ' + Math.round(cached.age / 36e5) + 'h ago)' : ''));
     return Promise.resolve(mmSaveLoc(cached.loc, cached.via));
   }
@@ -933,10 +1058,8 @@ var MM_LOC_PROMISE = (function(){
   return chain.then(function(hit){
     if(hit){ MM_LOC_ERR = ''; mmLocNote('location: ' + mmLocLabel(hit.loc) + ' (via ' + hit.via.replace(/^https?:\/\//, '') + ')'); return mmSaveLoc(hit.loc, hit.via); }
     MM_LOC_ERR = 'blocked';
-    /* a null city in the database means THIS line ran: the visit was still counted, only the
-       location service was unreachable (ad blocker / privacy extension / VPN / offline ISP) */
     try{ console.warn('[analytics] no visitor location - all ' + MM_LOC_SERVICES.length + ' IP services failed (' + tried.join(', ') + '). Visits and clicks are still recorded, only city/country is missing. Add ?mmloc to the page URL to test them one by one.'); }catch(_e){}
-    return mmSaveLoc(cached ? cached.loc : null, cached ? cached.via : null);   /* stale cache beats nothing */
+    return mmSaveLoc(cached ? cached.loc : null, cached ? cached.via : null);
   }, function(){
     MM_LOC_ERR = 'error';
     return mmSaveLoc(cached ? cached.loc : null, cached ? cached.via : null);
@@ -944,7 +1067,6 @@ var MM_LOC_PROMISE = (function(){
 })();
 window.MM_LOC_PROMISE = MM_LOC_PROMISE;
 
-/* once the answer arrives late, still hand it to the database (one cheap extra row) */
 MM_LOC_PROMISE.then(function(loc){
   try{
     if(loc && MM_LOC_LATE && !MM_LOC_BACKFILL && !MM_FRAMED){
@@ -955,6 +1077,7 @@ MM_LOC_PROMISE.then(function(loc){
 });
 
 /* ---- traffic source names: always the full, recognizable place name ---- */
+/* Source=Link/direct only means accessed via direct URL or link, NOT proof of sender */
 function mmCanonicalSource(s){
   s = String(s || '').toLowerCase().trim().replace(/^www\./, '');
   if(!s || s === '(direct)' || s === 'none') return 'direct';
@@ -969,11 +1092,10 @@ function mmCanonicalSource(s){
   if(s.indexOf('reddit') > -1 || s === 'redd.it') return 'reddit';
   if(s.indexOf('github') > -1) return 'github';
   if(s.indexOf('gmail') > -1 || s === 'email' || s === 'newsletter' || s === 'mail') return 'email';
-  return s;   /* any other site: keep its full hostname, e.g. google.com */
+  return s;
 }
 window.mmCanonicalSource = mmCanonicalSource;
 
-/* where did this visitor come from? (instagram / facebook / linkedin / full host / direct) */
 function mmSource(){
   try{
     var q = location.search || '';
@@ -990,7 +1112,6 @@ function mmSource(){
   return 'direct';
 }
 
-/* clean path: drop fbclid/gclid/hash junk, keep utm — readable rows in Supabase */
 function mmCleanPath(){
   try{
     var u = new URL(location.href);
@@ -1006,7 +1127,7 @@ function mmCleanPath(){
 
 function mmTrack(event, meta){
   try{
-    if(MM_FRAMED) return Promise.resolve();          /* no stats from dashboard preview */
+    if(MM_FRAMED) return Promise.resolve();
     if(typeof fetch !== 'function') return Promise.resolve();
     var sbUrl = SB_MM.url;
     var sbKey = SB_MM.key;
@@ -1016,27 +1137,44 @@ function mmTrack(event, meta){
       meta: (meta && typeof meta === 'object') ? meta : (meta ? { value: meta } : {}),
       path: mmCleanPath()
     };
-    /* wait for the (short, sequential) visitor id + the visitor's city/country, then send.
-       The location is cached after the first lookup, so normally nothing waits at all.
-       A brand-new visitor is held at most MM_LOC_WAIT for it — after that the event goes
-       out without a city (visit counts never depend on the lookup), and the answer that
-       arrives late is stored by the follow-up 'location' row instead. */
     var waitLoc = MM_LOC ? Promise.resolve(MM_LOC)
       : Promise.race([MM_LOC_PROMISE, new Promise(function(res){ setTimeout(function(){ res(null); }, MM_LOC_WAIT); })]);
     return Promise.all([MM_VID_PROMISE, waitLoc]).then(function(res){
       var vid = res[0], loc = res[1] || MM_LOC;
       payload.visitor_id = vid || MM_VID || null;
+      var m = {};
+      for(var k in payload.meta){ m[k] = payload.meta[k]; }
       if(loc){
-        var m = {};
-        for(var k in payload.meta){ m[k] = payload.meta[k]; }
         if(loc.city) m.city = loc.city;
         if(loc.region) m.region = loc.region;
         if(loc.country) m.country = loc.country;
         if(loc.code) m.country_code = loc.code;
-        payload.meta = m;
-      } else if(event !== 'location'){
-        MM_LOC_LATE++;                       /* location showed up too late for this one */
+        if(loc.isp) m.isp = loc.isp;
+        if(loc.org) m.org = loc.org;
+        if(loc.asn) m.asn = loc.asn;
+        var det = mmDetectIpType(loc);
+        m.ip_type = det.ip_type;
+        m.vpn_detected = det.vpn_detected;
+        m.proxy_detected = det.proxy_detected;
+        m.tor_detected = det.tor_detected;
+        m.hosting_detected = det.hosting_detected;
+        m.mobile_detected = det.mobile_detected;
+        m.location_confidence = det.location_confidence;
+        m.location_masked = det.location_masked;
+        m.location_is_estimate = true;
+        m.location_note = det.location_masked ? 'Location may be masked (VPN/Proxy/Tor/Hosting endpoint) - IP-based estimate only, not exact physical location' : 'IP-based estimate (city is ISP gateway, not exact physical location)';
       }
+      try{
+        var vt = mmClassifyVisitorType();
+        m.visitor_type = vt.visitor_type;
+        m.visitor_type_confidence = vt.confidence;
+        m.bot_signals = (vt.signals||[]).join(',');
+      }catch(_e){}
+      try{ m.user_agent = mmGetUserAgent(); }catch(_e){}
+      try{ m.traffic_source = mmSource(); }catch(_e){}
+      if(!m.source && m.traffic_source) m.source = m.traffic_source;
+      payload.meta = m;
+      if(!loc && event !== 'location'){ MM_LOC_LATE++; }
       return fetch(sbUrl + '/rest/v1/portfolio_events', {
         method: 'POST',
         headers: SB_MM.headers(),
@@ -1048,16 +1186,16 @@ function mmTrack(event, meta){
   }
 }
 window.mmTrack = mmTrack;
-
-/* ---- ?mmloc  →  on-page self test for this very feature (normal visitors never
+/* ---- ?mmloc  →  on-page self test for location + bot detection (normal visitors never
    see it: the block only runs when the address contains ?mmloc). It shows whether the
-   IP lookup answers in THIS browser, and writes one test row so the dashboard lights up. */
+   IP lookup answers in THIS browser, what type it is, and writes one test row so the
+   dashboard lights up. Privacy: city is ISP gateway estimate, not exact physical location. */
 (function(){
   try{
     if(!/[?&]mmloc\b/.test(location.search || '')) return;
     MM_LOC_DEBUG = true; window.MM_LOC_DEBUG = true;
     var el = document.createElement('div');
-    el.setAttribute('style', 'position:fixed;right:14px;bottom:14px;z-index:99999;max-width:360px;background:#0b1220;color:#e2e8f0;border:1px solid #334155;border-radius:12px;padding:12px 14px;font:12.5px/1.55 ui-monospace,Menlo,Consolas,monospace;box-shadow:0 12px 34px rgba(0,0,0,.5)');
+    el.setAttribute('style', 'position:fixed;right:14px;bottom:14px;z-index:99999;max-width:400px;max-height:80vh;overflow:auto;background:#0b1220;color:#e2e8f0;border:1px solid #334155;border-radius:12px;padding:12px 14px;font:12.5px/1.55 ui-monospace,Menlo,Consolas,monospace;box-shadow:0 12px 34px rgba(0,0,0,.5)');
     (document.body || document.documentElement).appendChild(el);
     var line = '🌍 location test: probing ' + MM_LOC_SERVICES.length + ' services…', paint = function(){ el.innerHTML = line; };
     paint();
@@ -1065,19 +1203,27 @@ window.mmTrack = mmTrack;
       var ok = null;
       list.forEach(function(r){ if(r.loc && !ok) ok = r; });
       if(ok) mmSaveLoc(ok.loc, ok.url);
+      var ipDet = ok && ok.loc ? mmDetectIpType(ok.loc) : null;
+      var vt = null;
+      try{ vt = mmClassifyVisitorType(); }catch(_e){}
+      var src = '';
+      try{ src = mmSource(); }catch(_e){}
       line = '🌍 <b>location: ' + (ok ? mmLocLabel(ok.loc) : 'NO ANSWER') + '</b>' +
         (ok && (ok.loc.isp || ok.loc.asn) ? ' <span style="opacity:.7">via ' + [ok.loc.isp, ok.loc.asn ? 'AS' + String(ok.loc.asn).replace(/^AS/i, '') : ''].filter(Boolean).join(' ') + '</span>' : '') + '<br>' +
-        (ok ? '<span style="opacity:.7">this is the city your traffic EXITS from (your ISP gateway) — not a device position, so a visitor in Asyut or Sohag can read as Cairo. Never a GPS coordinate.</span><br>' : '') +
+        (ipDet ? '<span style="color:'+(ipDet.location_masked?'#fbbf24':'#94a3b8')+'">IP Type: ' + esc(ipDet.ip_type) + ' | Confidence: ' + esc(ipDet.location_confidence) + (ipDet.location_masked ? ' | ⚠️ POSSIBLY MASKED (VPN/Proxy/Tor/Hosting)' : '') + '</span><br>' : '') +
+        (vt ? '<span style="opacity:.85">Visitor Type: ' + esc(vt.visitor_type) + ' (confidence: ' + esc(vt.confidence) + ') | Source: ' + esc(src) + ' (Source=Link means direct URL access, NOT proof of sender)</span><br>' : '') +
+        '<span style="opacity:.7;font-size:11px">⚠️ Location is IP-based ESTIMATE (city is ISP gateway, not exact physical location). Foreign country ≠ proof of real person — may be VPN endpoint. VPN/Proxy/Tor may be network exit. Bots/scanners can mislead. Never GPS. No precise location collected.</span><br>' +
         list.map(function(r){
+          var det = r.loc ? mmDetectIpType(r.loc) : null;
           return (r.loc ? '✅' : '❌') + ' ' + r.url.replace(/^https?:\/\//, '').replace(/\/.*$/, '') +
-                 ' → ' + (r.loc ? mmLocLabel(r.loc) : (r.err || 'failed'));
+                 ' → ' + (r.loc ? mmLocLabel(r.loc) + (det ? ' ['+det.ip_type+'/'+det.location_confidence+']' : '') : (r.err || 'failed'));
         }).join('<br>') + '<br>' +
         (ok ? 'cached for 6h + writing a test row…'
              : 'nothing reachable from this browser — uBlock / Brave / Firefox ETP / a VPN usually eats these hosts. Visits are still counted, only the city is missing.') +
         (MM_FRAMED ? '<br>⚠️ you are inside a preview iframe: tracking is skipped here by design — open the page itself.' : '');
       paint();
       if(ok && !MM_FRAMED){
-        Promise.resolve(mmTrack('location', { note: 'mmloc self test' })).then(function(){
+        Promise.resolve(mmTrack('location', { note: 'mmloc self test - enhanced detection' })).then(function(){
           line += '<br>✅ test row sent — refresh the dashboard Analytics tab (or Supabase → portfolio_events).';
           paint();
         });

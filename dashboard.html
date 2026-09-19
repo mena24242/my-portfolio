@@ -711,6 +711,7 @@ R.design = function(){
 R.settings = function(){
   const sec = CONTENT.settings.sections || {};
   const keys = ['about','education','experience','services','skills','projects','certifications','testimonials','contact'];
+  const secRows = keys.map(k=> '<label class="switch-row"><input type="checkbox" data-bool="settings.sections.'+k+'"'+(sec[k]!==false?' checked':'')+'><span>'+k.charAt(0).toUpperCase()+k.slice(1)+'</span></label>').join('');
   return '<h2>Settings</h2><div class="desc">Appearance, visibility, password & backups.</div>'+
     '<div class="card"><h3>Appearance<span class="line"></span></h3><p style="color:var(--muted);font-size:13px">Theme, colors, fonts, animations, layout, navbar, background, cards & buttons كلها اتنقلت لتبويب <b>🎨 Portfolio Control</b>. لون الـ Accent القديم هنا اتمنع — قيمته اتندمجت تلقائيًا في الإعدادات الجديدة.</p></div>'+
     '<div class="card"><h3>CV link<span class="line"></span></h3>'+
@@ -740,14 +741,23 @@ R.preview = function(){
      • the row predates the deploy (no location was ever written), or
      • this browser blocks the IP services (uBlock / Brave / Firefox ETP / VPN).
 ===================================================================== */
+/* =====================================================================
+   🌍 LOCATION CHECK — mirrors the provider list in index.html (keep both in sync).
+   Enhanced v4: includes ip-api.com with proxy/hosting/mobile flags, ISP/ASN detection.
+   A null city means one of two things, and this panel says which:
+     • the row predates the deploy (no location was ever written), or
+     • this browser blocks the IP services (uBlock / Brave / Firefox ETP / VPN).
+   Privacy: no GPS, city is ISP gateway estimate only, not exact physical location.
+===================================================================== */
 const MM_LOC_SERVICES = [
-  ['ipwho.is',     'https://ipwho.is/',                        d => (d && d.success === false) ? null : { city: d.city, country: d.country, code: d.country_code }],
-  ['ipapi.co',     'https://ipapi.co/json/',                   d => (d && d.error) ? null : { city: d.city, country: d.country_name, code: d.country_code }],
-  ['freeipapi.com','https://free.freeipapi.com/api/v1/json',   d => ({ city: d.cityName, country: d.countryName, code: d.countryCode })],
-  ['api.ip.sb',    'https://api.ip.sb/geoip',                  d => ({ city: d.city, country: d.country, code: d.country_code })],
-  ['geojs.io',     'https://get.geojs.io/v1/ip/geo.json',      d => ({ city: d.city, country: d.country, code: d.country_code })],
-  ['wtfismyip',    'https://wtfismyip.com/json',               d => ({ city: d.YourFuckingCity, country: d.YourFuckingCountry, code: d.YourFuckingCountryCode })],
-  ['api.my-ip.io', 'https://api.my-ip.io/v2/ip.json',         d => (!d || d.success === false) ? null : { city: '', country: (d.country || {}).name, code: (d.country || {}).code }]
+  ['ip-api.com',   'https://ip-api.com/json/?fields=status,message,country,countryCode,regionName,city,isp,org,as,proxy,hosting,mobile,query', d => (d && d.status !== 'success') ? null : { city: d.city, country: d.country, code: d.countryCode, isp: d.isp, asn: d.as, proxy: !!d.proxy, hosting: !!d.hosting }],
+  ['ipwho.is',     'https://ipwho.is/',                        d => (d && d.success === false) ? null : { city: d.city, country: d.country, code: d.country_code, isp: (d.connection && d.connection.isp) || d.isp, asn: (d.connection && d.connection.asn) || '', proxy: !!(d.security && d.security.proxy), hosting: !!(d.security && d.security.hosting) }],
+  ['ipapi.co',     'https://ipapi.co/json/',                   d => (d && d.error) ? null : { city: d.city, country: d.country_name, code: d.country_code, isp: d.org, asn: d.asn }],
+  ['freeipapi.com','https://free.freeipapi.com/api/v1/json',   d => ({ city: d.cityName, country: d.countryName, code: d.countryCode, isp: d.asnOrganization, asn: d.asn })],
+  ['api.ip.sb',    'https://api.ip.sb/geoip',                  d => ({ city: d.city, country: d.country, code: d.country_code, isp: d.isp, asn: d.asn })],
+  ['geojs.io',     'https://get.geojs.io/v1/ip/geo.json',      d => ({ city: d.city, country: d.country, code: d.country_code, isp: d.organization })],
+  ['wtfismyip',    'https://wtfismyip.com/json',               d => ({ city: d.YourFuckingCity, country: d.YourFuckingCountry, code: d.YourFuckingCountryCode, isp: d.YourFuckingISP })],
+  ['api.my-ip.io', 'https://api.my-ip.io/v2/ip.json',         d => (!d || d.success === false) ? null : { city: '', country: (d.country || {}).name, code: (d.country || {}).code, isp: (d.asn || {}).name }]
 ];
 function mmAskService(url, read, ms){
   const p = fetch(url, { cache: 'no-store' })
@@ -758,7 +768,8 @@ function mmAskService(url, read, ms){
       if(!loc) return { ok: false, err: 'no answer' };
       const txt = [loc.city, loc.country].map(v => (typeof v === 'string' || typeof v === 'number') ? String(v).trim() : '')
         .filter(Boolean).join(', ');
-      return txt ? { ok: true, txt: txt } : { ok: false, err: 'no city data' };
+      const extra = [loc.isp, loc.asn, loc.proxy?'proxy':'', loc.hosting?'hosting':''].filter(Boolean).join(' ');
+      return txt ? { ok: true, txt: txt + (extra ? ' ('+extra+')' : '') } : { ok: false, err: 'no city data' };
     })
     .catch(e => ({ ok: false, err: ((e && e.name) || 'failed') + ' — usually blocked by an ad blocker' }));
   return Promise.race([p, new Promise(res => setTimeout(() => res({ ok: false, err: 'timeout' }), ms || 2500))]);
@@ -773,21 +784,24 @@ async function loadLocCheck(){
     const r = await fetch(SB_URL + '/rest/v1/portfolio_events?select=event,created_at,meta&order=created_at.desc&limit=300', { headers: sbHeaders(), cache: 'no-store' });
     if(r.ok) rows = await r.json();
   }catch(e){ cov.textContent = 'unavailable (' + e.message + ')'; return; }
-  const n = rows.length, withLoc = rows.filter(e => e.meta && e.meta.country).length;   /* country is what the dashboard shows */
+  const n = rows.length, withLoc = rows.filter(e => e.meta && e.meta.country).length;
+  const withIsp = rows.filter(e => e.meta && e.meta.isp).length;
+  const withType = rows.filter(e => e.meta && e.meta.visitor_type).length;
   cov.innerHTML = n ? ('<b style="color:' + (withLoc ? 'var(--ok)' : 'var(--warn)') + '">' + withLoc + '</b> of the last ' + n + ' events carry a country' +
-                       (withLoc ? '' : ' — none saved yet')) : 'no events in the log yet';
+                       (withLoc ? '' : ' — none saved yet') + '<br>' +
+                       withIsp + ' with ISP/ASN, ' + withType + ' with visitor type (new tracking)') : 'no events in the log yet';
   if(lat) lat.innerHTML = rows[0] ? (esc(mmTimeAgo(rows[0].created_at)) + ' <span style="color:var(--muted)">(' + esc(new Date(rows[0].created_at).toLocaleString()) + ')</span>') : 'nothing recorded yet';
 }
 async function runLocProbe(){
   const box = document.getElementById('locProbeOut'); if(!box) return;
   box.style.display = 'block';
-  box.innerHTML = '<p style="color:var(--muted);font-size:13px">Probing every service from this browser…</p>';
+  box.innerHTML = '<p style="color:var(--muted);font-size:13px">Probing every service from this browser… (includes VPN/Proxy/Hosting detection via ip-api.com)</p>';
   const list = await Promise.all(MM_LOC_SERVICES.map(svc => mmAskService(svc[1], svc[2]).then(r => Object.assign({ name: svc[0] }, r))));
   const ok = list.filter(r => r.ok).length;
   const useless = list.filter(r => !r.ok && !/TypeError|blocked|timeout|Failed/i.test(r.err || '')).length;
   box.innerHTML =
     '<div style="margin-top:12px;font-size:13px">' +
-      (ok ? '<div class="banner" style="background:rgba(52,211,153,.12);border-color:rgba(52,211,153,.35);color:var(--ok);margin-bottom:10px">✅ ' + ok + ' of ' + list.length + ' services answer from this browser (' + esc((list.find(r => r.ok) || {}).txt) + '). The lookup works here — a null in the log means that row was written <b>before</b> the updated index.html went live.</div>'
+      (ok ? '<div class="banner" style="background:rgba(52,211,153,.12);border-color:rgba(52,211,153,.35);color:var(--ok);margin-bottom:10px">✅ ' + ok + ' of ' + list.length + ' services answer from this browser (' + esc((list.find(r => r.ok) || {}).txt) + '). The lookup works here — a null in the log means that row was written <b>before</b> the updated index.html went live. Privacy: city is ISP gateway estimate, not exact physical location. No GPS.</div>'
           : '<div class="banner" style="background:rgba(251,191,36,.1);border-color:rgba(251,191,36,.35);color:var(--warn);margin-bottom:10px">⚠️ No service answers from this browser: an ad blocker / privacy extension (uBlock Origin, Brave Shields, Firefox Enhanced Tracking Protection) or a VPN is eating these requests. Visitors with the same setup get counted as visits but without a city. Turn it off for your own test visit to see the full pipeline.</div>'
           + (useless ? '<p style="color:var(--muted);font-size:12.5px;margin-bottom:10px">' + useless + ' of them did reply, but without usable data — the free tiers are rate limited (about 1,000 lookups/day per service), so try again later.</p>' : '')) +
       list.map(r => '<div style="display:flex;gap:9px;align-items:center;padding:4px 0;border-bottom:1px solid var(--line)">' +
@@ -818,21 +832,23 @@ const ANALYTICS_SNIPPET = [
   "mmTrack('contact_submit',{ email: 'visitor@mail.com' });",
   "/* event names above are exactly the ones this dashboard counts. */",
   "",
-  "/* 🌍 location: index.html also resolves the visitor's city + country from their IP",
-  "   (a free public lookup — no GPS, no permission prompt) and merges it into meta of",
-  "   every event, so the Analytics tab can show 'Cairo, Egypt' next to the visitor:",
-  "fetch('https://ipwho.is/').then(r => r.json()).then(function(d){",
-  "  if(d && d.success !== false) mmTrack('view', { source: 'direct', city: d.city, country: d.country, country_code: d.country_code });",
+  "/* 🌍 v4 location + bot detection: index.html now also detects VPN/Proxy/Tor/Hosting/Data Center,",
+  "   ISP/ASN, location_confidence, visitor_type (Human / Bot / Link Preview / Scanner / Automated / Unknown),",
+  "   IP type, traffic_source, user_agent — all stored in meta. City is ISP gateway estimate only, not exact.",
+  "   Source=Link means direct URL access, NOT proof of sender. No GPS, no precise PII. */",
+  "fetch('https://ip-api.com/json/?fields=status,message,country,countryCode,regionName,city,isp,org,as,proxy,hosting,mobile,query').then(r => r.json()).then(function(d){",
+  "  if(d && d.status === 'success') mmTrack('view', { source: 'direct', city: d.city, country: d.country, country_code: d.countryCode, isp: d.isp, asn: d.as, ip_type: d.proxy ? 'proxy' : (d.hosting ? 'hosting' : 'residential'), location_confidence: 'low' });",
   "}); */"
 ].join('\n');
 
 R.analytics = function(){
-  return '<h2>Analytics</h2><div class="desc">Visits, unique visitors, clicks, where people came from &amp; which city/country they are in — reported by the live site, stored in Supabase.</div>'+
-    '<div class="hint" style="margin-bottom:14px">🌍 Location is read from the visitor\'s IP address (city level, via a free public lookup). <b>No GPS and no location permission</b> are ever requested, no coordinates are stored, and the IP itself is never saved.</div>'+
+  return '<h2>Analytics</h2><div class="desc">Visits, unique visitors, clicks, where people came from & which city/country they are in — plus Visitor Type, IP Type, ISP/ASN, Location Confidence. Reported by the live site, stored in Supabase.</div>'+
+    '<div class="banner" style="background:rgba(56,189,248,.08);border-color:rgba(56,189,248,.25);color:var(--muted);font-size:12.5px">⚠️ Privacy & Reliability Notes: <b>Country/City = IP-based ESTIMATE</b> (city is ISP gateway, not exact physical location). <b>Source=Link/Direct = accessed via direct URL/link</b>, NOT proof of who sent link. <b>Foreign country ≠ proof of real person</b> — may be VPN/Proxy endpoint. <b>VPN/Proxy/Tor/Hosting = network exit may be masked</b>. <b>Bots/Scanners can mislead</b>. <b>Never GPS, never precise, never invent.</b> Labels use non-definitive wording: Human / Possible Bot / Possible Link Scanner / Possible Scanner / Automated / Unknown.</div>'+
+    '<div class="hint" style="margin-bottom:14px">🌍 Location is read from the visitor\'s IP address (city level, via a free public lookup). <b>No GPS and no location permission</b> are ever requested, no coordinates are stored, and the IP itself is never saved (only ISP/ASN text). Visitor Type uses multi-signal (User-Agent, IP/ASN, hosting, bot signatures, behavior) — marks Unknown if uncertain.</div>'+
     '<div class="chip-row" style="margin-bottom:14px"><button class="mini" data-act="analytics-refresh">↻ Refresh</button><button class="mini" data-act="loc-probe">🔎 Test the location lookup</button></div>'+
     '<div class="card" id="analyticsBody"><p style="color:var(--muted)">Loading analytics…</p></div>'+
     '<div class="card" style="margin-bottom:14px"><h3>🔎 Location check<span class="line"></span></h3>'+
-      '<p style="color:var(--muted);font-size:13px">City / country are resolved in the <b>visitor\'s own browser</b> (from their IP, no GPS). A visitor whose browser blocks those services is still counted as a visit — only the location stays empty, which is what a <code>null</code> means.</p>'+
+      '<p style="color:var(--muted);font-size:13px">City / country are resolved in the <b>visitor\'s own browser</b> (from their IP, no GPS). A visitor whose browser blocks those services is still counted as a visit — only the location stays empty, which is what a <code>null</code> means. New: VPN/Proxy/Tor/Hosting/Data Center detection via ip-api.com + ISP/ASN heuristics. City is always ISP gateway estimate.</p>'+
       '<div class="hint" style="margin-top:10px">Events with a city: <b id="locCoverage">…</b><br>Latest event in the log: <b id="locLatest">…</b></div>'+
       '<div id="locProbeOut" style="display:none"></div>'+
     '</div>'+
@@ -857,9 +873,9 @@ async function fetchMessagesCount(){
   return null;
 }
 /* =====================================================================
-   🌍 VISITOR LOCATION (city + country). The live site reads the visitor's IP
+   🌍 VISITOR LOCATION + NEW FIELDS. The live site reads the visitor's IP
    through a free public lookup — never GPS, never a permission prompt — and
-   stores only 'city' / 'country' in the event meta. This builds the same shape
+   stores only coarse data in the event meta. This builds the same shape
    get_analytics() returns, straight from raw event rows, so the panels work
    even on a database that has not run the newest setup.sql yet.
 ===================================================================== */
@@ -879,10 +895,37 @@ function mmTimeAgo(iso){
   const days = Math.round(hrs / 24);
   return days + (days === 1 ? ' day ago' : ' days ago');
 }
+function mmVisitorTypeLabel(vt){
+  vt = String(vt||'').toLowerCase();
+  if(vt==='human') return 'Human';
+  if(vt==='bot') return 'Possible Bot';
+  if(vt==='link_preview') return 'Possible Link Preview';
+  if(vt==='scanner') return 'Possible Scanner';
+  if(vt==='automated') return 'Possible Automated';
+  if(vt==='unknown' || !vt) return 'Unknown';
+  return vt;
+}
+function mmIpTypeLabel(it){
+  it = String(it||'').toLowerCase();
+  if(it==='residential') return 'Residential';
+  if(it==='mobile') return 'Mobile';
+  if(it==='vpn') return 'VPN (possible)';
+  if(it==='proxy') return 'Proxy (possible)';
+  if(it==='tor') return 'Tor (possible)';
+  if(it==='hosting') return 'Data Center / Hosting';
+  if(it==='unknown' || !it) return 'Unknown';
+  return it;
+}
+function mmConfidenceLabel(c){
+  c = String(c||'').toLowerCase();
+  if(c==='high') return 'High';
+  if(c==='medium') return 'Medium';
+  if(c==='low') return 'Low';
+  return 'Unknown';
+}
 function locationFromRows(rows){
-  const clean = v => { v = String(v == null ? '' : v).trim(); return v ? v.slice(0, 64) : ''; };
-  const cities = {}, countries = {}, visitors = {};
-  /* each event that carries a city/country adds itself to the three rollups */
+  const clean = v => { v = String(v == null ? '' : v).trim(); return v ? v.slice(0, 80) : ''; };
+  const cities = {}, countries = {}, visitors = {}, vTypes = {}, ipTypes = {}, isps = {};
   const bump = (map, key, fresh, e) => {
     const o = map[key] || (map[key] = Object.assign(fresh, { visits: 0, _v: {} }));
     if(e.event === 'view') o.visits++;
@@ -898,6 +941,8 @@ function locationFromRows(rows){
   (rows || []).forEach(e => {
     const m = e.meta || {};
     const city = clean(m.city), region = clean(m.region), country = clean(m.country), code = clean(m.country_code).toUpperCase();
+    const isp = clean(m.isp || m.org), asn = clean(m.asn);
+    const ip_type = clean(m.ip_type), visitor_type = clean(m.visitor_type);
     const at = String(e.created_at || '');
     if(city) bump(cities, city + '\u00a7' + country, { city: city, country: country, country_code: code }, e);
     if(country){
@@ -905,15 +950,32 @@ function locationFromRows(rows){
       if(city && !c._seen){ c._seen = {}; }
       if(city && c._seen && !c._seen[city]){ c._seen[city] = 1; c.cities++; }
     }
-    /* per visitor: the newest known location + their own visit/event counts */
+    if(visitor_type) bump(vTypes, visitor_type, { visitor_type: visitor_type }, e);
+    if(ip_type) bump(ipTypes, ip_type, { ip_type: ip_type }, e);
+    if(isp) bump(isps, isp, { isp: isp, asn: asn }, e);
     const vid = e.visitor_id || '(unknown)';
     const v = visitors[vid] || (visitors[vid] = { visitor_id: vid, visits: 0, events: 0, city: '', region: '',
-      country: '', country_code: '', source: '', first_visit: '', last_seen: '', _src: {} });
+      country: '', country_code: '', source: '', first_visit: '', last_seen: '', _src: {},
+      isp: '', asn: '', org: '', ip_type: '', visitor_type: '', visitor_type_confidence: '', location_confidence: '', traffic_source: '', user_agent: '', vpn_detected: null, proxy_detected: null, tor_detected: null, hosting_detected: null, location_masked: null });
     v.events++;
     if(!v.first_visit || at < v.first_visit) v.first_visit = at;
     if(at > v.last_seen){
       v.last_seen = at;
       if(city || country){ v.city = city; v.region = region; v.country = country; v.country_code = code; }
+      if(isp) v.isp = isp;
+      if(asn) v.asn = asn;
+      if(m.org) v.org = clean(m.org);
+      if(ip_type) v.ip_type = ip_type;
+      if(visitor_type) v.visitor_type = visitor_type;
+      if(m.visitor_type_confidence) v.visitor_type_confidence = clean(m.visitor_type_confidence);
+      if(m.location_confidence) v.location_confidence = clean(m.location_confidence);
+      if(m.traffic_source || m.source) v.traffic_source = clean(m.traffic_source || m.source);
+      if(m.user_agent) v.user_agent = clean(m.user_agent);
+      if(m.vpn_detected !== undefined) v.vpn_detected = !!m.vpn_detected;
+      if(m.proxy_detected !== undefined) v.proxy_detected = !!m.proxy_detected;
+      if(m.tor_detected !== undefined) v.tor_detected = !!m.tor_detected;
+      if(m.hosting_detected !== undefined) v.hosting_detected = !!m.hosting_detected;
+      if(m.location_masked !== undefined) v.location_masked = !!m.location_masked;
     }
     if(e.event === 'view'){
       v.visits++;
@@ -921,23 +983,21 @@ function locationFromRows(rows){
       v._src[src] = (v._src[src] || 0) + 1;
     }
   });
-  /* the source shown next to a visitor is the one they used most */
   const people = Object.keys(visitors).map(k => {
     const r = visitors[k], out = plain(r);
     let top = '', best = 0;
     for(const src in r._src){ if(r._src[src] > best){ best = r._src[src]; top = src; } }
     if(top) out.source = top;
     return out;
-  }).sort((a, b) => String(b.last_seen).localeCompare(String(a.last_seen))).slice(0, 40);
-  return { cities: finish(cities), countries: finish(countries), visitors: people };
+  }).sort((a, b) => String(b.last_seen).localeCompare(String(a.last_seen))).slice(0, 60);
+  return { cities: finish(cities), countries: finish(countries), visitors: people, visitor_types: finish(vTypes), ip_types: finish(ipTypes), isps: finish(isps) };
 }
 
 /* compute the same shape as get_analytics() from raw rows */
 function analyticsFromRows(rows, days){
   const t = { view:0, unique_visitors:0, project_view:0, cv_download:0, github_click:0, linkedin_click:0, contact_submit:0 };
-  const visitors = new Set(), perDay = {}, proj = {}, src = {};
-  for(let i = 0; i <= days; i++){ perDay[new Date(Date.now() - (days - i) * 864e5).toISOString().slice(0,10)] = { v: new Set(), n: 0 }; } /* inclusive ends = 31 rows, same as SQL */
-  /* full, recognizable place names - identical mapping to pb_event_source() in SQL */
+  const visitors = new Set(), perDay = {}, proj = {}, src = {}, vType = {}, ipType = {};
+  for(let i = 0; i <= days; i++){ perDay[new Date(Date.now() - (days - i) * 864e5).toISOString().slice(0,10)] = { v: new Set(), n: 0 }; }
   const canon = s => {
     s = String(s || '').toLowerCase().trim().replace(/^www\./, '');
     if(!s || s === '(direct)' || s === 'none') return 'direct';
@@ -954,7 +1014,7 @@ function analyticsFromRows(rows, days){
     if(s.includes('gmail') || s === 'email' || s === 'newsletter' || s === 'mail') return 'email';
     return s;
   };
-  const srcOf = e => canon((e.meta && e.meta.source) || ((e.path || '').match(/utm_source=([^&]+)/) || [])[1] || (/fbclid=/.test(e.path || '') ? 'facebook' : 'direct'));
+  const srcOf = e => canon((e.meta && (e.meta.traffic_source || e.meta.source)) || ((e.path || '').match(/utm_source=([^&]+)/) || [])[1] || (/fbclid=/.test(e.path || '') ? 'facebook' : 'direct'));
   (rows || []).forEach(e => {
     const k = String(e.created_at || '').slice(0, 10);
     if(!(k in perDay)) return;
@@ -963,6 +1023,8 @@ function analyticsFromRows(rows, days){
     if(e.event === 'view'){
       t.view++; visitors.add(e.visitor_id || 'anon');
       const s = String(srcOf(e) || 'direct'); src[s] = (src[s] || 0) + 1;
+      const vt = String((e.meta && e.meta.visitor_type) || 'unknown').toLowerCase(); vType[vt] = (vType[vt]||0)+1;
+      const it = String((e.meta && e.meta.ip_type) || 'unknown').toLowerCase(); ipType[it] = (ipType[it]||0)+1;
     }
     else if(e.event === 'project_view'){ t.project_view++; const p = (e.meta && (e.meta.project || e.meta.title)) || 'unknown'; proj[p] = (proj[p] || 0) + 1; }
     else if(e.event === 'cv_download' || e.event === 'download_cv') t.cv_download++;
@@ -973,10 +1035,15 @@ function analyticsFromRows(rows, days){
   t.unique_visitors = visitors.size;
   const daily = Object.keys(perDay).sort().map(d => ({ date: d, visitors: perDay[d].v.size, events: perDay[d].n }));
   let top = null; for(const p in proj){ if(!top || proj[p] > top.views) top = { id: p, views: proj[p] }; }
-  const sources = Object.keys(src).map(s => ({ source: s, visits: src[s] })).sort((a, b) => b.visits - a.visits).slice(0, 6);
-  const loc = locationFromRows(rows);       /* city + country come from the same rows */
+  const sources = Object.keys(src).map(s => ({ source: s, visits: src[s] })).sort((a, b) => b.visits - a.visits).slice(0, 8);
+  const visitor_types = Object.keys(vType).map(vt => ({ visitor_type: vt, visits: vType[vt] })).sort((a,b)=>b.visits-a.visits);
+  const ip_types = Object.keys(ipType).map(it => ({ ip_type: it, visits: ipType[it] })).sort((a,b)=>b.visits-a.visits);
+  const loc = locationFromRows(rows);
   return { days: days, totals: t, daily: daily, top_project: top, sources: sources,
-           cities: loc.cities, countries: loc.countries, visitors: loc.visitors };
+           cities: loc.cities, countries: loc.countries, visitors: loc.visitors,
+           visitor_types: loc.visitor_types && loc.visitor_types.length ? loc.visitor_types : visitor_types,
+           ip_types: loc.ip_types && loc.ip_types.length ? loc.ip_types : ip_types,
+           isps: loc.isps };
 }
 
 async function loadAnalytics(){
@@ -992,13 +1059,13 @@ async function loadAnalytics(){
       return;
     }
   }
-  /* an older get_analytics() has no location keys: roll them up from the raw
-     events instead, so the country panel never depends on the SQL being re-run */
   if(!Array.isArray(d.countries) || !Array.isArray(d.visitors)){
     try{
       const loc = locationFromRows(await fetchEventsRaw(30));
       if(!Array.isArray(d.countries)) d.countries = loc.countries;
       if(!Array.isArray(d.visitors)) d.visitors = loc.visitors;
+      if(!Array.isArray(d.visitor_types)) d.visitor_types = loc.visitor_types;
+      if(!Array.isArray(d.ip_types)) d.ip_types = loc.ip_types;
     }catch(e){}
   }
   const t = d.totals || {};
@@ -1011,11 +1078,14 @@ async function loadAnalytics(){
     ['💼 LinkedIn clicks', t.linkedin_click],
     ['📝 Form submits', t.contact_submit]
   ];
-  /* 🌍 where visitors are: city + country resolved from the IP (never GPS) */
   const cts = Array.isArray(d.countries) ? d.countries : [];
   if(cts.length) cards.push(['🌍 Countries', cts.length]);
   const msgCount = (d.messages !== undefined && d.messages !== null) ? d.messages : await fetchMessagesCount();
   if(msgCount !== null) cards.push(['📨 Messages', msgCount]);
+  const vts = Array.isArray(d.visitor_types) ? d.visitor_types : [];
+  const its = Array.isArray(d.ip_types) ? d.ip_types : [];
+  if(vts.length) cards.push(['🤖 Visitor Types', vts.length]);
+  if(its.length) cards.push(['🔌 IP Types', its.length]);
 
   const daily = d.daily || [];
   const top = d.top_project;
@@ -1023,12 +1093,11 @@ async function loadAnalytics(){
   const bars = daily.map((x,i)=>{
     const v = x.visitors||0, h = Math.round(100 * v / maxV);
     return '<div class="chart-col" title="'+esc(x.date)+' — '+v+' visitor(s), '+(x.events||0)+' event(s)">'+
-      '<div class="chart-bar" style="height:'+Math.max(2,h)+'%"></div>'+
+      '<div class="chart-bar" style="height:'+Math.max(2,h)+'%">'+'</div>'+
       '<span class="chart-lbl">'+(i % 5 === 0 || i === daily.length-1 ? String(x.date).slice(5) : '')+'</span></div>';
   }).join('');
   const totVis = daily.reduce((s,x)=> s+(x.visitors||0),0), totEv = daily.reduce((s,x)=> s+(x.events||0),0);
 
-  /* traffic sources */
   const srcs = d.sources || [];
   const maxSrc = Math.max(1, ...srcs.map(s => s.visits || 0));
   const srcHtml = srcs.length ? srcs.map(s =>
@@ -1039,12 +1108,6 @@ async function loadAnalytics(){
     '</div>').join('')
     : '<p style="color:var(--muted);font-size:13px">No sources recorded yet — new visits are tagged automatically (instagram / facebook / direct…).</p>';
 
-  /* 🌍 where visitors are: shown at COUNTRY level on purpose. The city an IP
-     resolves to is the city of the provider's gateway, not where the person is
-     standing (all of Upper Egypt reads as Cairo on Egyptian lines), so the city
-     is kept in meta but deliberately not displayed. No GPS, no location
-     permission, no coordinates - country from the IP is ~99% reliable. */
-  const ppl = Array.isArray(d.visitors) ? d.visitors : [];
   const maxLoc = Math.max(1, ...cts.map(c => c.visitors || 0));
   const locHtml = cts.length ? cts.map(c =>
     '<div style="display:flex;align-items:center;gap:10px;margin:7px 0">'+
@@ -1055,30 +1118,87 @@ async function loadAnalytics(){
       '<span style="min-width:70px;text-align:right;font-size:11.5px;color:var(--muted)" title="'+(c.visits||0)+' visit(s) in the last 30 days">'+(c.visits||0)+(c.visits === 1 ? ' visit' : ' visits')+'</span>'+
     '</div>').join('')
     : '<p style="color:var(--muted);font-size:13px">No country saved yet. Two normal reasons: rows written <b>before</b> the updated index.html went live have no location (the IP is never stored, so they can never be filled retroactively), or a visitor\'s browser blocks the IP services (ad blocker / VPN). Use the <b>🔎 Test the location lookup</b> button above to see which one it is.</p>';
+
+  const vTypeHtml = vts.length ? vts.map(vt =>
+    '<div style="display:flex;align-items:center;gap:10px;margin:6px 0">'+
+      '<span style="width:150px;font-size:12.5px">'+esc(mmVisitorTypeLabel(vt.visitor_type))+'</span>'+
+      '<span style="flex:1;height:8px;border-radius:4px;background:var(--panel2);overflow:hidden;display:block"><span style="display:block;height:100%;width:'+Math.round(100*(vt.visitors||vt.visits||0)/Math.max(1,...vts.map(x=>x.visitors||x.visits||0)))+'%;background:linear-gradient(90deg,var(--acc2),transparent)"></span></span>'+
+      '<b style="min-width:26px;text-align:right">'+(vt.visitors||vt.visits||0)+'</b>'+
+    '</div>').join('') : '<p style="color:var(--muted);font-size:13px">No visitor type yet — new tracking adds Human / Possible Bot / Possible Link Preview / Possible Scanner / Automated / Unknown (non-definitive, multi-signal).</p>';
+
+  const ipTypeHtml = its.length ? its.map(it =>
+    '<div style="display:flex;align-items:center;gap:10px;margin:6px 0">'+
+      '<span style="width:150px;font-size:12.5px">'+esc(mmIpTypeLabel(it.ip_type))+'</span>'+
+      '<span style="flex:1;height:8px;border-radius:4px;background:var(--panel2);overflow:hidden;display:block"><span style="display:block;height:100%;width:'+Math.round(100*(it.visitors||it.visits||0)/Math.max(1,...its.map(x=>x.visitors||x.visits||0)))+'%;background:linear-gradient(90deg,var(--warn),transparent)"></span></span>'+
+      '<b style="min-width:26px;text-align:right">'+(it.visitors||it.visits||0)+'</b>'+
+    '</div>').join('') : '<p style="color:var(--muted);font-size:13px">No IP type yet — new tracking detects Residential / Mobile / VPN / Proxy / Tor / Data Center / Hosting / Unknown. Location may be masked when VPN/Proxy/Tor/Hosting.</p>';
+
+  let ispList = [];
+  try{
+    if(Array.isArray(d.isps) && d.isps.length) ispList = d.isps;
+    else if(Array.isArray(d.visitors)){
+      // derive ISPs from visitors if isps not provided by RPC
+      const map = {};
+      d.visitors.forEach(v=>{
+        const isp = (v.isp||'').trim() || '(unknown)';
+        if(!map[isp]) map[isp] = { isp: isp, asn: v.asn||'', visitors:0 };
+        map[isp].visitors++;
+      });
+      ispList = Object.values(map).sort((a,b)=>b.visitors-a.visitors).slice(0,10);
+    }
+  }catch(e){ ispList = []; }
+  const ispHtml = ispList.length ? ispList.slice(0,10).map(i =>
+    '<div style="display:flex;align-items:center;gap:10px;margin:6px 0">'+
+      '<span style="width:160px;font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+esc(i.isp)+'">'+esc(i.isp||'(unknown)')+'</span>'+
+      '<span style="font-size:11px;color:var(--muted)">'+esc(i.asn||'')+'</span>'+
+      '<span style="margin-left:auto;font-size:12px"><b>'+(i.visitors||0)+'</b> visitors</span>'+
+    '</div>').join('') : '<p style="color:var(--muted);font-size:12.5px">No ISP/ASN yet.</p>';
+
+  const ppl = Array.isArray(d.visitors) ? d.visitors : [];
   const when = s => { const t = Date.parse(s); return t ? new Date(t).toLocaleString() : ''; };
   const visitorHtml = ppl.map(v => {
     const tip = (v.first_visit ? 'First visit: ' + when(v.first_visit) : '') + (v.last_seen ? (v.first_visit ? '  ·  ' : '') + 'Last seen: ' + when(v.last_seen) : '');
-    return '<div class="vrow">'+
-      '<span class="vid">'+esc(v.visitor_id || '—')+'</span>'+
-      '<span class="loc">'+(v.country_code ? mmFlag(v.country_code)+' ' : '')+esc(v.country || 'no country saved')+'</span>'+
-      '<span class="sub">from '+esc(v.source || 'direct')+'</span>'+
-      '<span class="sub">'+(v.visits||0)+' visit'+((v.visits||0) === 1 ? '' : 's')+(v.events ? ' · '+(v.events||0)+' event'+((v.events||0) === 1 ? '' : 's') : '')+'</span>'+
-      '<time title="'+esc(tip)+'">'+esc(mmTimeAgo(v.last_seen))+'</time>'+
+    const vtLabel = mmVisitorTypeLabel(v.visitor_type);
+    const ipLabel = mmIpTypeLabel(v.ip_type);
+    const confLabel = mmConfidenceLabel(v.location_confidence);
+    const masked = v.location_masked ? ' <span style="color:var(--warn);font-size:11px">⚠️ possibly masked</span>' : '';
+    const flags = [];
+    if(v.vpn_detected) flags.push('VPN');
+    if(v.proxy_detected) flags.push('Proxy');
+    if(v.tor_detected) flags.push('Tor');
+    if(v.hosting_detected) flags.push('Data Center');
+    const flagStr = flags.length ? ' ['+flags.join(', ')+']' : '';
+    return '<div class="vrow" style="flex-direction:column;align-items:flex-start;gap:6px">'+
+      '<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;width:100%">'+
+        '<span class="vid">'+esc(v.visitor_id || '—')+'</span>'+
+        '<span class="loc">'+(v.country_code ? mmFlag(v.country_code)+' ' : '')+esc(v.country || 'no country saved')+(v.city ? ', '+esc(v.city) : '')+'</span>'+
+        '<span class="sub">from '+esc(v.source || v.traffic_source || 'direct')+' <span style="opacity:.6;font-size:10px">(Source=Link = direct URL access, NOT proof of sender)</span></span>'+
+        '<time title="'+esc(tip)+'" style="margin-left:auto">'+esc(mmTimeAgo(v.last_seen))+'</time>'+
+      '</div>'+
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;font-size:11.5px;color:var(--muted)">'+
+        '<span style="background:rgba(56,189,248,.1);border:1px solid rgba(56,189,248,.2);padding:2px 8px;border-radius:999px">Visitor: '+esc(vtLabel)+(v.visitor_type_confidence ? ' ('+esc(v.visitor_type_confidence)+')' : '')+'</span>'+
+        '<span style="background:rgba(251,191,36,.1);border:1px solid rgba(251,191,36,.2);padding:2px 8px;border-radius:999px">IP: '+esc(ipLabel)+flagStr+'</span>'+
+        '<span style="background:rgba(148,163,184,.1);border:1px solid var(--line);padding:2px 8px;border-radius:999px">Location Confidence: '+esc(confLabel)+masked+'</span>'+
+        (v.isp ? '<span style="background:var(--panel);border:1px solid var(--line);padding:2px 8px;border-radius:999px">ISP: '+esc(v.isp)+(v.asn ? ' / '+esc(v.asn) : '')+'</span>' : '')+
+      '</div>'+
+      (v.location_masked ? '<div style="font-size:11px;color:var(--warn)">⚠️ Location may be masked — this IP appears to be VPN/Proxy/Tor/Hosting endpoint. City/Country is estimate of network exit, not exact physical location. Foreign country ≠ proof of real person.</div>' : '<div style="font-size:10.5px;color:var(--muted)">📍 IP-based estimate (city = ISP gateway, not exact). No GPS, no precise location. Treat as approximate.</div>')+
     '</div>';
   }).join('');
 
   const emptyAll = totEv === 0 && !srcs.length;
   box.innerHTML =
-    (mode === 'raw' ? '<div class="banner" style="margin-bottom:12px">ℹ️ Computed from raw events (the <code>get_analytics</code> RPC is unavailable — run the new <code>setup.sql</code> to enable server-side stats &amp; the messages count here).</div>' : '')+
+    (mode === 'raw' ? '<div class="banner" style="margin-bottom:12px">ℹ️ Computed from raw events (the <code>get_analytics</code> RPC is unavailable — run the new <code>setup.sql</code> to enable server-side stats & the messages count here).</div>' : '')+
     (emptyAll
       ? '<p style="color:var(--muted);font-size:13.5px;padding:18px 0">No visits recorded in the last 30 days.<br>Open your <b>live site</b> (this dashboard preview is not counted) and press ↻ Refresh.</p>'
       :
     '<div class="row3" style="margin-bottom:14px">'+cards.map(c=>'<div class="stat"><span class="l">'+c[0]+'</span><span class="n">'+(c[1]===undefined||c[1]===null?'—':c[1])+'</span></div>').join('')+'</div>'+
-    '<div class="card" style="margin-bottom:14px"><h3>Where visitors came from<span class="line"></span></h3>'+srcHtml+'</div>'+
+    '<div class="card" style="margin-bottom:14px"><h3>Where visitors came from<span class="line"></span></h3>'+srcHtml+'<p style="color:var(--muted);font-size:11px;margin-top:8px">ℹ️ Source=Link/Direct only means accessed via direct URL or link — does NOT prove who sent the link. Preserve existing detection (Instagram / Facebook / LinkedIn / etc). Clarify: Link ≠ proof of sender.</p></div>'+
     '<div class="card" style="margin-bottom:14px"><h3>🌍 Where visitors are · by country<span class="line"></span></h3>'+locHtml+
-      '<p style="color:var(--muted);font-size:11.5px;margin-top:10px">Country resolved from the visitor\'s <b>IP address</b> — reliable (~99%). Cities are deliberately <b>not</b> shown: an IP is registered to the provider\'s gateway city, so one country often resolves to its capital for everyone, and a VPN reads as the VPN city. No GPS and no precise-location permission are used, and no coordinates or IP addresses are stored. <b>🔎 Test the location lookup</b> above shows the provider + ASN behind any reading.</p>'+'</div>'+
-    (visitorHtml ? '<div class="card" style="margin-bottom:14px"><h3>Visitors<span class="line"></span></h3>'+visitorHtml+
-      '<p style="color:var(--muted);font-size:11.5px;margin-top:4px">Latest '+(ppl.length)+' visitor'+(ppl.length === 1 ? '' : 's')+' — id, the country their IP belongs to, where they came from, and when.</p></div>' : '')+
+      '<p style="color:var(--muted);font-size:11.5px;margin-top:10px">Country resolved from the visitor\'s <b>IP address</b> — estimate (~99% for country, city is ISP gateway). Cities are deliberately less emphasized: an IP is registered to the provider\'s gateway city, so one country often resolves to its capital for everyone, and a VPN reads as the VPN city. No GPS and no precise-location permission are used, and no coordinates or IP addresses are stored (only ISP/ASN text). <b>🔎 Test the location lookup</b> above shows the provider + ASN behind any reading. <b>Foreign country ≠ proof of real person — may be VPN endpoint.</b></p>'+'</div>'+
+    '<div class="row" style="margin-bottom:14px"><div class="card"><h3>🤖 Visitor Type<span class="line"></span></h3>'+vTypeHtml+'<p style="color:var(--muted);font-size:11px;margin-top:8px">Non-definitive labels: Human / Possible Bot / Possible Link Preview / Possible Scanner / Possible Automated / Unknown. Multi-signal: User-Agent, IP/ASN, hosting, bot signatures, behavior. Mark Unknown if uncertain. Bots/scanners can mislead.</p></div><div class="card"><h3>🔌 IP Type<span class="line"></span></h3>'+ipTypeHtml+'<p style="color:var(--muted);font-size:11px;margin-top:8px">Residential / Mobile vs VPN / Proxy / Tor / Hosting/Data Center. Store ISP/ASN. Mark location as potentially masked when VPN/Proxy/Tor. Never claim exact physical location. VPN/proxy may be network endpoint.</p></div></div>'+
+    '<div class="card" style="margin-bottom:14px"><h3>🏢 ISP / ASN<span class="line"></span></h3>'+ispHtml+'<p style="color:var(--muted);font-size:11px;margin-top:8px">ISP/ASN stored to help identify hosting/data center vs residential. No unnecessary PII, no precise GPS.</p></div>'+
+    (visitorHtml ? '<div class="card" style="margin-bottom:14px"><h3>Visitors — detailed<span class="line"></span></h3>'+visitorHtml+
+      '<p style="color:var(--muted);font-size:11.5px;margin-top:8px">Latest '+(ppl.length)+' visitor'+(ppl.length === 1 ? '' : 's')+' — with Country, City, Source, Visitor Type (Human/Possible Bot/Possible Link Scanner/VPN/Proxy/Data Center/Unknown), IP Type, Location Confidence (Low when masked), ISP/ASN. All labels non-definitive. Privacy: no GPS, city/country = estimate, VPN/proxy may be network endpoint, Link source not proof, foreign country not proof of real person, bots/scanners can mislead, never invent.</p></div>' : '')+
     '<div style="background:var(--panel2);border:1px solid var(--line);border-radius:14px;padding:14px 16px;margin-bottom:14px;font-size:13.5px">'+
       '🏆 <b>Most opened project:</b> ' + (top ? esc(top.id) + ' <span style="color:var(--muted);font-size:12.5px">(' + top.views + ' opens)</span>' : '<span style="color:var(--muted)">no project opens yet — click a project card on your site to test it</span>') +
     '</div>'+
@@ -1091,58 +1211,6 @@ async function loadAnalytics(){
 }
 
 /* ---- ✉️ Messages / Contact ---- */
-const CONTACT_SNIPPET = [
-  "/* your site's contact form — submit handler (uses SB + nameEl/emailEl/msgEl inputs) */",
-  "form.addEventListener('submit', function(ev){",
-  "  ev.preventDefault();",
-  "  fetch(SB.url + '/rest/v1/portfolio_messages', {",
-  "    method: 'POST',",
-  "    headers: { 'apikey': SB.key, 'Authorization': 'Bearer ' + SB.key, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },",
-  "    body: JSON.stringify({ name: nameEl.value.trim(), email: emailEl.value.trim(), message: msgEl.value.trim() })",
-  "  }).then(function(r){ if(!r.ok) throw 0; showThanks(); form.reset(); })",
-  "    .catch(function(){ showError(); });",
-  "});"
-].join('\n');
-let msgFilter = 'all';
-
-R.messages = function(){
-  return '<h2>Messages</h2><div class="desc">Contact form submissions from the live site. Opening a new message marks it read.</div>'+
-    '<div id="messagesBody"><p style="color:var(--muted)">Loading messages…</p></div>'+
-    '<div class="card" style="margin-top:18px"><h3>Site wiring<span class="line"></span></h3>'+
-    '<p style="color:var(--muted);font-size:13px">Your site\'s contact form should post <b>name / email / message</b> like this (uses <code>SB</code> from the Analytics wiring above):</p>'+
-    '<pre class="snip">'+esc(CONTACT_SNIPPET)+'</pre></div>';
-};
-
-async function loadMessages(){
-  const box = document.getElementById('messagesBody'); if(!box) return;
-  box.innerHTML = '<p style="color:var(--muted)">Loading…</p>';
-  let rows;
-  try{
-    const r = await fetch(SB_URL + '/rest/v1/portfolio_messages?select=id,name,email,message,status,created_at&order=created_at.desc&limit=200', { headers: sbHeaders(), cache: 'no-store' });
-    if(!r.ok){
-      let msg = 'HTTP ' + r.status;
-      try{ const j = await r.json(); if(j && j.message) msg = j.message; }catch(e){}
-      throw new Error(msg + ' — run the “ADDITION (v2)” section of setup.sql in Supabase → SQL Editor first.');
-    }
-    rows = await r.json();
-  }catch(e){
-    box.innerHTML = '<div class="banner">⚠️ ' + esc(e.message) + '</div>';
-    return;
-  }
-  const counts = { all: rows.length, new: 0, read: 0, replied: 0 };
-  rows.forEach(m => { if(counts[m.status] !== undefined) counts[m.status]++; });
-  const shown = msgFilter === 'all' ? rows : rows.filter(m => m.status === msgFilter);
-  box.innerHTML =
-    '<div class="chip-row" style="margin-bottom:14px">'+
-      ['all','new','read','replied'].map(f=>
-        '<button class="mini" data-act="msg-filter" data-filter="'+f+'"'+(msgFilter===f ? ' style="border-color:var(--acc);color:var(--acc)"' : '')+'>'+
-        f.charAt(0).toUpperCase()+f.slice(1)+' ('+counts[f]+')</button>').join('')+
-    '</div>'+
-    (shown.length ? shown.map(m=>{
-      const unread = m.status === 'new';
-      return '<div class="msg'+(unread?' unread':'')+'">'+
-        '<div class="msg-head"><b>'+esc(m.name)+'</b><span class="em">&lt;'+esc(m.email)+'&gt;</span>'+
-          '<span class="badge '+esc(m.status)+'">'+esc(m.status)+'</span>'+
           '<time>'+new Date(m.created_at).toLocaleString()+'</time></div>'+
         '<p class="msg-text"'+(unread ? ' data-act="msg-open" data-id="'+m.id+'" style="cursor:pointer" title="Click to mark as read"' : '')+'>'+esc(m.message)+'</p>'+
         '<div class="msg-actions">'+
